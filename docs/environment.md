@@ -16,7 +16,9 @@
 
 当前授权配置命令：authorize_test.py --unlimited-testing，保留既有累计尝试，旧限制移入 superseded_limits；不需要反复追加批次。有限模式 --calls/--daily-cny 仅供以后明确选择，不可偷偷覆盖当前授权。插件和提供商探针共享加锁的请求计数，避免并发丢失或加密盘临时替换错误。
 
-v0.2 可选择 --suite natural（3 次）、--suite privacy（1 次）、--suite retrieval --m01-indices 1（1 次），或 --suite persona --persona-start N --persona-cases K（2K 次，限开发题）。compare_thinking.py 必须先停止 AstrBot，独占同一配额后仅调用两次，不打印密钥或保存思维文本；结束后用 start.ps1 恢复服务。它不是工具或手机验收。
+evaluate_memory.py 支持 --suite natural、privacy、retrieval、automatic；自动记忆套件用合成主体写 20 条普通陈述并做 27 次新会话问答及生命周期检查，清理活跃数据与临时 key。人格默认只选开发集，--persona-set heldout 必须显式选择保留集；P04 为 8 轮，其余当前各 2 轮。新报告记录实际部署人格 SHA-256 和插件版本。
+
+compare_thinking.py 与插件共享计数锁，可在服务运行时测试，逐次检查 STOP/模型开关；--persona-ids P02,P03,P05,P07,P19 做 5 场景两种配置的 20 次真实提供商请求。没有命令执行、长期记忆或手机投递，只比较短期会话；不打印密钥或保存思维文本。费用用官方美元峰值 0.30/0.006/1.20 每百万未缓存输入/缓存输入/输出 token 作上界估计，不当作账单或费用闸门，依据 [官方价格](https://api-docs.deepseek.com/quick_start/pricing/)（2026-10-26）。
 
 测试：在 F:/chatbot 下将 PYTHONPATH 设为 `F:/chatbot-runtime/AstrBot;F:/chatbot`、ASTRBOT_ROOT 设为上述 C 盘 runtime，再用 F 盘 AstrBot 的 `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py" -v`。框架事件测试使用假模型和假发送，不产生费用。scripts/local_paths.py 统一维护代码/私有数据两条路径。
 

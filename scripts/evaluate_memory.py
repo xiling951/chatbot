@@ -6,12 +6,14 @@ facts are untouched. Each question uses a fresh conversation to exclude history.
 """
 
 import argparse
+import hashlib
 import json
 import time
 import uuid
 from pathlib import Path
 
 import httpx
+import yaml
 from local_paths import DATA, PLUGIN_DATA
 
 
@@ -20,19 +22,23 @@ def main():
     parser.add_argument("--persona-cases", type=int, default=0)
     parser.add_argument("--persona-start", type=int, default=0)
     parser.add_argument(
+        "--persona-set", choices=["development", "heldout"], default="development"
+    )
+    parser.add_argument(
         "--suite",
         choices=["memory", "natural", "persona", "retrieval", "privacy", "automatic"],
         default="memory",
     )
     parser.add_argument("--m01-indices", default=",".join(str(i) for i in range(1, 21)))
     args = parser.parse_args()
+    limit = 10 if args.persona_set == "heldout" else 20
     if (
-        not 0 <= args.persona_cases <= 20
-        or not 0 <= args.persona_start <= 20
-        or args.persona_start + args.persona_cases > 20
+        not 0 <= args.persona_start <= limit
+        or not 0 <= args.persona_cases <= limit
+        or args.persona_start + args.persona_cases > limit
     ):
         raise SystemExit(
-            "Development scenarios must remain in the first twenty; held-out cases stay separate"
+            "Persona selection must stay inside the selected development/held-out set"
         )
     project = Path(__file__).resolve().parents[1]
     cases = json.loads(
@@ -52,6 +58,15 @@ def main():
         "persona": [],
         "selected_m01_indices": sorted(indices),
         "suite": args.suite,
+        "persona_set": args.persona_set,
+        "persona_sha256": hashlib.sha256(
+            (DATA / "plugins/astrbot_plugin_companion_core/persona.yaml").read_bytes()
+        ).hexdigest(),
+        "plugin_version": yaml.safe_load(
+            (DATA / "plugins/astrbot_plugin_companion_core/metadata.yaml").read_text(
+                encoding="utf-8"
+            )
+        )["version"],
     }
     output = PLUGIN_DATA / ("memory-evaluation-" + run_id + ".local.json")
     with (
@@ -272,24 +287,27 @@ def main():
             persona_cases = json.loads(
                 (project / "tests/persona_cases.json").read_text(encoding="utf-8")
             )
-            for case in [c for c in persona_cases if not c["held_out"]][
-                args.persona_start : args.persona_start + args.persona_cases
-            ]:
+            for case in [
+                c
+                for c in persona_cases
+                if c["held_out"] == (args.persona_set == "heldout")
+            ][args.persona_start : args.persona_start + args.persona_cases]:
                 conversation = uuid.uuid4().hex
                 scenario = {
                     "id": case["id"],
                     "check": case["check"],
-                    "held_out": False,
+                    "held_out": case["held_out"],
                     "turns": [],
                     "human_score": None,
                 }
                 for prompt in case["turns"]:
+                    started = time.monotonic()
+                    reply = send(prompt, user=other, conversation=conversation)
                     scenario["turns"].append(
                         {
                             "prompt": prompt,
-                            "reply": send(
-                                prompt, user=other, conversation=conversation
-                            ),
+                            "reply": reply,
+                            "seconds": round(time.monotonic() - started, 3),
                         }
                     )
                 report["persona"].append(scenario)

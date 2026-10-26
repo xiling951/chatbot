@@ -1,0 +1,16 @@
+enabled: false
+timezone: America/Tijuana
+maximum_per_local_day: 2
+quiet_start_hour: 23
+quiet_end_hour: 8
+unanswered_cooldown_hours: 24
+lease_seconds: 60
+safe_retry_max_attempts: 2
+safe_retry_base_seconds: 30
+default_grace_seconds: 300
+missed_periods: latest_valid_only
+ambiguous_local_time: first_fold
+nonexistent_local_time: first_valid_minute
+unknown_delivery: keep_quota_and_do_not_retry
+device_observation: not_observed
+read_state: unknown
