@@ -18,6 +18,7 @@ from astrbot.core.platform import (
 )
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.provider.entities import LLMResponse, TokenUsage
+from astrbot.api.message_components import File, Image, Record, Video
 from plugins.astrbot_plugin_companion_core.main import CompanionCore
 from plugins.astrbot_plugin_companion_core.memory import MemoryStore
 
@@ -185,6 +186,78 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.handle(event)
         self.plugin.context.llm_generate.assert_not_awaited()
         self.assertIn("输入上限", event.sent[0])
+
+    async def test_natural_memory_requests_preserve_delete_and_stop(self):
+        for index, text in enumerate(["记住，我喜欢听爵士", "更正，我喜欢听摇滚"]):
+            event = LocalEvent(text, f"natural-{index}")
+            await self.plugin.handle(event)
+            self.assertEqual(event.sent, ["已保存这条明确记忆。"])
+        view = LocalEvent("查看记忆", "natural-view")
+        await self.plugin.handle(view)
+        self.assertIn("摇滚", view.sent[0])
+        self.assertNotIn("爵士", view.sent[0])
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.db_helper.get_platform_message_history",
+            AsyncMock(return_value=[]),
+        ):
+            await self.plugin.handle(LocalEvent("忘记我的音乐偏好", "natural-delete"))
+        view = LocalEvent("查看记忆", "natural-empty")
+        await self.plugin.handle(view)
+        self.assertEqual(view.sent, ["当前没有记忆。"])
+        await self.plugin.handle(LocalEvent("暂停记忆", "natural-stop"))
+        event = LocalEvent("记住，我住在青岛", "natural-stopped-write")
+        await self.plugin.handle(event)
+        self.assertIn("disabled", event.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_roleplay_request_does_not_save_reality_fact(self):
+        event = LocalEvent("记住，角色扮演中我叫海盗", "roleplay-memory")
+        await self.plugin.handle(event)
+        self.assertIn("角色扮演", event.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM facts").fetchone()[0], 0
+        )
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_unsupported_media_never_spends_or_claims_understanding(self):
+        for index, component in enumerate(
+            [
+                Image(file="unused.png"),
+                Video(file="unused.mp4"),
+                File(file="unused.txt", name="unused.txt"),
+                Record(file="unused.wav"),
+            ]
+        ):
+            event = LocalEvent("描述这个附件", f"media-{index}")
+            event.message_obj.message = [component]
+            await self.plugin.handle(event)
+            self.assertEqual(len(event.sent), 1)
+            self.assertIn("文字", event.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_weixin_cloud_transcript_uses_real_event_owner(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["weixin_oc"] = ["owner"]
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        event = LocalEvent("", "voice-transcript", sender="owner", platform="weixin_oc")
+        event.message_obj.message = [Record(file="not-read.silk")]
+        event.message_obj.raw_message = {
+            "item_list": [{"type": 3, "voice_item": {"text": "记住，我喜欢听爵士"}}]
+        }
+        await self.plugin.handle(event)
+        self.assertEqual(event.sent, ["已保存这条明确记忆。"])
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_ambiguous_forget_does_not_claim_erasure_or_touch_facts(self):
+        await self.plugin.handle(LocalEvent("记住，我喜欢爵士", "privacy-fact"))
+        event = LocalEvent("忘掉刚才的资料", "privacy-ambiguous")
+        await self.plugin.handle(event)
+        self.assertIn("尚未执行删除", event.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT value FROM facts").fetchone()[0],
+            "爵士",
+        )
+        self.plugin.context.llm_generate.assert_not_awaited()
 
 
 if __name__ == "__main__":

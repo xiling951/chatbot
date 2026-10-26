@@ -20,9 +20,9 @@ P0–P6 的编号已保留；P2 包含最小插件闭环，P3 不依赖跨平台
 
 ## 当前已完成与未完成
 
-已部署一个固定 v4.29.3 的 AstrBot 原生实例，代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 在 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（F 盘 exFAT 不支持 ACL，勿把私有数据移回 F 盘）。项目内已有 Companion Core 源码、SQLite 迁移和测试；Web 模型冒烟 20/20、重启接续、删除后模型不再回忆及隔离恢复已验证。准确状态和重现入口见 reports/execution_status.md，勿重复部署或重置预算。
+已部署 AstrBot v4.29.3 与 Companion Core v0.2.0，代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 在 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（F 盘 exFAT 不支持 ACL）。40 项本地检查通过，Web 中文显式记忆 3/3、隐私回归及检索复测通过；手机新版媒体和中文入口仍待人工验收。当前版本已建立 GitHub 基线回退标签，见 docs/backup_restore.md。勿重复部署或重置预算。
 
-已授权复用桌面版 DSH 当前凭据（实际目录为 AppData/Roaming/dsh-desktop/harness，默认 ~/.dsh 中为旧无效凭据）。初始 25 次之后用户已明确允许继续，本次追加 60 次，每日仍 5 元，最新余量见执行状态，勿再次按旧 25 次限制要求同一授权。微信仅授权本人扫码后的机器人单聊；已启用且重启后仍能收发，其他渠道验收待完成。原生语音气泡是硬要求，当前适配器不支持，保持未满足。
+已授权复用桌面版 DSH 当前凭据（AppData/Roaming/dsh-desktop/harness；默认 ~/.dsh 为旧无效密钥）。用户允许继续至配额耗尽，本轮在每日 5 元保守上限内累计尝试 100 次，现余 0，已停止新增模型请求；不代表账户余额或实付 5 元耗尽。用户休息，手机/扫码/本人测试暂挂，醒后接续。微信仅本人绑定后的单聊获授权；原生语音气泡仍未满足。下一步按执行状态核对，不重复请求同一已给授权。
 
 ## 第一批应实际推进的工作
 

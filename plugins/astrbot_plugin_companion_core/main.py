@@ -12,6 +12,7 @@ import yaml
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core import db_helper
+from astrbot.api.message_components import File, Image, Record, Video
 from astrbot.core.agent.message import (
     AssistantMessageSegment,
     TextPart,
@@ -20,9 +21,10 @@ from astrbot.core.agent.message import (
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .memory import MemoryStore
+from .memory_intent import normalize_memory_command
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped explicit memory", "0.1.0")
+@register("astrbot_plugin_companion_core", "local", "Scoped explicit memory", "0.2.0")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -72,6 +74,34 @@ class CompanionCore(Star):
                 getattr(event.message_obj, "message_str", "") or event.get_message_str()
             ).strip()
             try:
+                components = event.get_messages() or []
+                if any(isinstance(part, (Image, Video, File)) for part in components):
+                    await event.send(
+                        event.plain_result(
+                            "已收到媒体消息，当前尚未启用图片、视频或文件内容理解。请用文字说明内容；我不会声称已看懂附件。"
+                        )
+                    )
+                    return
+                if any(isinstance(part, Record) for part in components):
+                    raw = getattr(event.message_obj, "raw_message", {})
+                    transcripts = (
+                        [
+                            str(item.get("voice_item", {}).get("text", "")).strip()
+                            for item in raw.get("item_list", [])
+                            if isinstance(item, dict) and item.get("type") == 3
+                        ]
+                        if isinstance(raw, dict)
+                        else []
+                    )
+                    if event.get_platform_name() != "weixin_oc" or not any(transcripts):
+                        await event.send(
+                            event.plain_result(
+                                "已收到音频，但没有取得可用转写，当前不读取音频内容。请改用文字。"
+                            )
+                        )
+                        return
+                    text = "\n".join(value for value in transcripts if value)
+                text = normalize_memory_command(text)
                 if text.startswith(("/记住 ", "/更正 ")):
                     command, content = text.split(" ", 1)
                     if "=" not in content:
@@ -127,7 +157,7 @@ class CompanionCore(Star):
                         else "已停止保存和注入记忆；已有条目仍可查看或删除。"
                     )
                 elif text in ("/帮助", "/记忆帮助"):
-                    reply = "/记住 属性=值\n/更正 属性=值\n/记忆\n/忘记 属性 或 /忘记 全部\n/停止记忆\n/恢复记忆\n/导出记忆\n普通聊天不会自动写入长期记忆。"
+                    reply = "可以说：记住，我喜欢听爵士；更正，我喜欢听摇滚；忘记我的音乐偏好。\n也支持：/记住 属性=值\n/更正 属性=值\n/记忆\n/忘记 属性 或 /忘记 全部\n/停止记忆\n/恢复记忆\n/导出记忆\n普通聊天不会自动写入长期记忆。"
                 elif text.startswith("/"):
                     reply = (
                         "当前测试入口由 Companion Core 接管；使用 /记忆帮助 查看命令。"

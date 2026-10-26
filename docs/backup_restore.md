@@ -16,3 +16,18 @@ backup 使用 SQLite backup API。restore 必须选择不存在的隔离目标�
 恢复删除前旧备份时允许保守丢弃已更正的旧条目；不会从旧备份伪造恢复备份后才写入的新值。恢复当前备份可以保持 ID、来源、版本、范围一致。两种情形已用临时库验证。
 
 配置备份包含凭据，只留在受限运行目录；不要写入项目 reports 或上传。框架 data_v4.db 属独立显示历史，不作为模型事实恢复源，也不能拿旧显示历史重新抽取已删除内容。
+
+## GitHub 源码回退
+
+已验证基线提交 41f860f2537d59534212ddcebd5a3007bd21e80d，远程标签 baseline-2026-10-26-weixin-memory。main 保留基线，继续实现使用 implementation/v1.2-memory-mvp 分支。GitHub 不保存密钥、数据库、登录状态或私有验收正文，因此源码备份不能代替本机数据备份。
+
+回退可建立独立 checkout，避免覆盖当前工作：
+
+```powershell
+git -c safe.directory=F:/chatbot -C F:/chatbot worktree add F:/chatbot-baseline baseline-2026-10-26-weixin-memory
+powershell -File F:/chatbot/scripts/stop.ps1
+F:/chatbot-runtime/AstrBot/.venv/Scripts/python.exe F:/chatbot-baseline/scripts/deploy_local.py
+powershell -File F:/chatbot/scripts/start.ps1
+```
+
+先确认 F:/chatbot-baseline 不存在；不要用 reset --hard 清除尚未保存的修改。当前 v0.1/v0.2 均为 schema 2，代码回退不需要恢复旧数据库，必须保持最新删除账本及调用配额。未来 schema 改变后先核对兼容性。v0.2 部署前另有受限的 backups/before-v0.2.sqlite，本轮没有把它激活为服务库。
