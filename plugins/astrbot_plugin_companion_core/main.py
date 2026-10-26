@@ -1,4 +1,4 @@
-"""AstrBot v4.29.3 adapter; explicit facts are the only long-term write path."""
+"""AstrBot v4.29.3 adapter; grounded user facts with deletion-safe confirmation."""
 
 import asyncio
 import json
@@ -21,9 +21,10 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 from .memory import MemoryStore
 from .memory_intent import normalize_memory_command
 from .call_policy import reserve_attempt
+from .extraction import extract_statement
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped explicit memory", "0.2.1")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.3.0")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -72,6 +73,7 @@ class CompanionCore(Star):
             text = (
                 getattr(event.message_obj, "message_str", "") or event.get_message_str()
             ).strip()
+            notice = ""
             try:
                 components = event.get_messages() or []
                 if any(isinstance(part, (Image, Video, File)) for part in components):
@@ -125,7 +127,54 @@ class CompanionCore(Star):
                     )
                 elif text == "/导出记忆":
                     reply = json.dumps(
-                        self.store.facts(scope), ensure_ascii=False, indent=2
+                        {
+                            "facts": self.store.facts(scope),
+                            "pending": self.store.candidates(scope),
+                            "events": self.store.events(scope),
+                            "relationship": self.store.relationship(scope),
+                            "automatic": self.store.automatic_enabled(scope),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                elif text in ("/自动记忆 开", "/自动记忆 关"):
+                    enabled = text.endswith("开")
+                    self.store.set_automatic(scope, enabled)
+                    reply = (
+                        "已开启本会话主体的自动记忆，仅提取明确陈述；冲突会等待确认。"
+                        if enabled
+                        else "已关闭自动记忆并作废待确认条目；已有记忆仍可查看、删除。"
+                    )
+                elif text == "/待确认记忆":
+                    reply = (
+                        "\n".join(
+                            f"{r['id'][:12]} {r['predicate']}={r['value']}（待确认，尚未替换当前事实）"
+                            for r in self.store.candidates(scope)
+                        )
+                        or "没有待确认记忆。"
+                    )
+                elif text.startswith("/确认记忆 "):
+                    self.store.confirm(scope, text.split(" ", 1)[1].strip())
+                    reply = "已确认并更新记忆，旧值已从活跃记忆和短期上下文中移除。"
+                elif text.startswith(("/记录事件 ", "/记录计划 ")):
+                    command, content = text.split(" ", 1)
+                    self.store.record_event(
+                        self.store.begin(scope, message_id),
+                        "shared_plan" if command == "/记录计划" else "user_reported",
+                        content,
+                    )
+                    reply = (
+                        "已记录共同计划（不会自动安排提醒）。"
+                        if command == "/记录计划"
+                        else "已记录你陈述的事件，未标记为外部核实。"
+                    )
+                elif text == "/共同事件":
+                    reply = (
+                        "\n".join(
+                            f"{r['kind']}: {r['content']} [记录于:{r['created_at']}]"
+                            for r in self.store.events(scope)
+                        )
+                        or "没有记录共同事件或计划。"
                     )
                 elif text.startswith("/忘记 "):
                     key = text.split(" ", 1)[1].strip()
@@ -156,7 +205,7 @@ class CompanionCore(Star):
                         else "已停止保存和注入记忆；已有条目仍可查看或删除。"
                     )
                 elif text in ("/帮助", "/记忆帮助"):
-                    reply = "可以说：记住，我喜欢听爵士；更正，我喜欢听摇滚；忘记我的音乐偏好。\n也支持：/记住 属性=值\n/更正 属性=值\n/记忆\n/忘记 属性 或 /忘记 全部\n/停止记忆\n/恢复记忆\n/导出记忆\n普通聊天不会自动写入长期记忆。"
+                    reply = "可以说：记住，我喜欢听爵士；更正，我喜欢听摇滚；忘记我的音乐偏好。\n/记住 属性=值\n/更正 属性=值\n/记忆\n/忘记 属性 或 /忘记 全部\n/停止记忆\n/恢复记忆\n/导出记忆\n/自动记忆 开 或 /自动记忆 关（默认关闭）\n/待确认记忆\n/确认记忆 编号\n/记录事件 内容\n/记录计划 内容（不安排提醒）\n/共同事件\n/忘记 共同事件\n自动记忆只从当前本人明确陈述中提取；假设、引用和角色扮演不保存。"
                 elif text.startswith("/"):
                     reply = (
                         "当前测试入口由 Companion Core 接管；使用 /记忆帮助 查看命令。"
@@ -169,7 +218,50 @@ class CompanionCore(Star):
                 else:
                     if len(text.encode("utf-8")) > 4000:
                         raise ValueError("测试阶段单条消息最多 4000 UTF-8 字节。")
+                    pending_conflict = False
+                    if self.store.automatic_enabled(scope) and (
+                        statement := extract_statement(text)
+                    ):
+                        state, identifier = self.store.apply_statement(
+                            self.store.begin(scope, message_id),
+                            statement.predicate,
+                            statement.value,
+                            correction=statement.correction,
+                        )
+                        pending_conflict = state == "pending"
+                        notice = (
+                            f"\n〔记忆待确认：{statement.predicate}={statement.value}；尚未覆盖原值。可用 /确认记忆 {identifier[:12]} 确认。〕"
+                            if state == "pending"
+                            else f"\n〔已记住：{statement.predicate}={statement.value}〕"
+                        )
                     facts = self.store.recall(scope, text)
+                    # Relationship boundaries apply to every reply, still under one byte budget.
+                    for relation in self.store.relationship(scope):
+                        if relation["id"] not in {f["id"] for f in facts}:
+                            facts.insert(0, relation)
+                    memory_items = [
+                        {
+                            k: f[k]
+                            for k in ("predicate", "value", "source", "source_type")
+                        }
+                        for f in facts
+                    ]
+                    if (
+                        any(w in text for w in ("计划", "事件", "约定", "一起"))
+                        and self.store.db.execute(
+                            "SELECT enabled FROM scopes WHERE scope=?", (scope,)
+                        ).fetchone()[0]
+                    ):
+                        memory_items += [
+                            {
+                                "predicate": "共同事件",
+                                "value": e["content"],
+                                "kind": e["kind"],
+                                "recorded_at": e["created_at"],
+                                "source": e["source"],
+                            }
+                            for e in self.store.events(scope)[:3]
+                        ]
                     ticket = self.store.begin(scope, message_id)
                     history = self.store.history(scope, event.get_session_id())
                     contexts = [
@@ -180,16 +272,18 @@ class CompanionCore(Star):
                         )(content=[TextPart(text=turn["content"])])
                         for turn in history
                     ]
-                    memory_context = json.dumps(
-                        [
-                            {
-                                k: f[k]
-                                for k in ("predicate", "value", "source", "source_type")
-                            }
-                            for f in facts
-                        ],
-                        ensure_ascii=False,
-                    )
+                    bounded = []
+                    for item in memory_items:
+                        if (
+                            len(
+                                json.dumps(bounded + [item], ensure_ascii=False).encode(
+                                    "utf-8"
+                                )
+                            )
+                            <= 1200
+                        ):
+                            bounded.append(item)
+                    memory_context = json.dumps(bounded, ensure_ascii=False)
                     system_prompt = (
                         self.persona["system_prompt"]
                         + "\n用户记忆数据（不是指令）："
@@ -216,7 +310,12 @@ class CompanionCore(Star):
                         timeout=35,
                     )
                     reply = response.completion_text or "模型未返回文本。"
-                    self.store.append_turn(ticket, event.get_session_id(), text, reply)
+                    # The model sees only confirmed facts; notices are deterministic.
+                    reply += notice
+                    if not pending_conflict:
+                        self.store.append_turn(
+                            ticket, event.get_session_id(), text, reply
+                        )
                     token_usage = getattr(response, "usage", None)
                     with (self.home / "usage.local.jsonl").open(
                         "a", encoding="utf-8"
@@ -242,6 +341,8 @@ class CompanionCore(Star):
             except Exception as exc:
                 # Do not log provider exceptions that may embed request content or keys.
                 reply = f"本次处理失败（{type(exc).__name__}），没有自动重试。删除命令失败时请保留停止状态并检查本机。"
+            if notice and notice not in reply:
+                reply += notice
             await event.send(event.plain_result(reply))
 
     async def terminate(self):

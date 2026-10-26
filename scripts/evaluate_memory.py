@@ -21,7 +21,7 @@ def main():
     parser.add_argument("--persona-start", type=int, default=0)
     parser.add_argument(
         "--suite",
-        choices=["memory", "natural", "persona", "retrieval", "privacy"],
+        choices=["memory", "natural", "persona", "retrieval", "privacy", "automatic"],
         default="memory",
     )
     parser.add_argument("--m01-indices", default=",".join(str(i) for i in range(1, 21)))
@@ -152,6 +152,76 @@ def main():
             )
 
         try:
+            if args.suite == "automatic":
+                send("/自动记忆 开")
+                for case in cases:
+                    reply = send(case["statement"])
+                    if "已记住" not in reply:
+                        raise RuntimeError(
+                            "Grounded statement was not saved: " + case["key"]
+                        )
+                for index, case in enumerate(cases, 1):
+                    check(f"AUTO-M01-{index:02}", case["query"], case["value"])
+                send("我喜欢听摇滚")
+                pending = json.loads(send("/导出记忆"))["pending"]
+                if len(pending) != 1 or pending[0]["value"] != "摇滚":
+                    raise RuntimeError("Conflict was not held for confirmation")
+                check(
+                    "AUTO-conflict-old-value",
+                    "我喜欢哪种曲风",
+                    "爵士",
+                    forbidden=["摇滚"],
+                )
+                if "不存在" not in send(
+                    "/确认记忆 " + pending[0]["id"][:12], user=other
+                ):
+                    raise RuntimeError("Cross-subject confirmation was not rejected")
+                send("/确认记忆 " + pending[0]["id"][:12])
+                check("AUTO-confirmed", "我喜欢哪种曲风", "摇滚", forbidden=["爵士"])
+                send("我现在喜欢听古典")
+                check(
+                    "AUTO-time-change",
+                    "我喜欢哪种曲风",
+                    "古典",
+                    forbidden=["摇滚", "爵士"],
+                )
+                send("请不要叫我宝贝")
+                send("我不希望你催我回复")
+                send("/记录计划 一起读科幻")
+                export = json.loads(send("/导出记忆"))
+                if (
+                    len(export["relationship"]) != 3
+                    or export["events"][0]["kind"] != "shared_plan"
+                ):
+                    raise RuntimeError("Relationship and event persistence failed")
+                check("AUTO-shared-plan", "我们记录了什么共同计划", "科幻")
+                check(
+                    "AUTO-other-plan",
+                    "我们记录了什么共同计划",
+                    forbidden=["科幻"],
+                    user=other,
+                )
+                send("如果我住在上海")
+                check("AUTO-hypothesis", "我住在哪个城市", "青岛", forbidden=["上海"])
+                send("我喜欢听民谣")
+                send("/自动记忆 关")
+                export = json.loads(send("/导出记忆"))
+                if export["pending"] or export["automatic"]:
+                    raise RuntimeError(
+                        "Disabling auto memory did not invalidate pending"
+                    )
+                send("/忘记 全部")
+                export = json.loads(send("/导出记忆"))
+                if any(
+                    export[k] for k in ("facts", "pending", "events", "relationship")
+                ):
+                    raise RuntimeError("Deletion left active derived memory")
+                check(
+                    "AUTO-deleted",
+                    "我喜欢哪种曲风",
+                    forbidden=["古典", "民谣", "摇滚", "爵士"],
+                )
+                report["automatic_lifecycle_checks_passed"] = True
             if args.suite in {"memory", "retrieval"}:
                 for case in cases:
                     reply = send(f"/记住 {case['key']}={case['value']}")

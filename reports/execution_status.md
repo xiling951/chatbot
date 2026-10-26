@@ -4,7 +4,7 @@
 
 ## 当前状态
 
-用户已纠正停止条件：指 Codex 自身额度，DeepSeek 项目测试不限次数。此前以自设 DeepSeek 计数和 5 元预留停止是执行误解，已撤销。Companion Core v0.2.1 已部署，47 项本地检查通过；旧计数为 0 时真实 Web 普通聊天已恢复。不以 DeepSeek 批次数量或日期作为提前停止条件。
+用户已纠正停止条件：指 Codex 自身额度，DeepSeek 项目测试不限次数，旧次数/5 元/日期闸门已撤销。Companion Core v0.3.0 已部署，schema 3；64 项本地检查通过。真实 Web 自动记忆 20 事实跨新会话问答 20/20，另 7 项冲突、时间变化、隔离、计划和删除问答均通过。完整项目仍在实施，不以 DeepSeek 批次数量自行停止。
 
 AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 为 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（NTFS 仅 Lenovo/SYSTEM）。普通模型回复及免费记忆管理已恢复，保留超时、有限重试、停止开关与用量记录。用户休息期间手机人工验收继续暂挂。
 
@@ -20,8 +20,8 @@ AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROO
 
 - P0 环境与 Web 基线：通过。T01–T04、T06 有直接证据，T05 工具测试未做且非当前前置；见 P0.md。
 - P1 手机渠道关卡：进行中，用户休息期间搁置人工手机测试。原有文字/重启/暗号流程证据有效，正式 30 条文字及 10 个媒体待测，原生语音气泡硬要求未满足。新增媒体诚实降级、微信云端转写路径有离线事件验证；tests/media_cases.json 不代表手机验收通过。
-- P2 最小插件与人格：进行中。14 项框架事件检查通过，开发场景采样扩至 P01–P17（17 场景、34 回复），保留题未动、未评分。思考关闭/开启各 1 次真实提供商探针均返回完整文本，不能据此判优。P15 暴露的隐私表述已修复并真实复测，见 P2.md。
-- P3 单渠道记忆：进行中。19 项存储测试、3 项自然语言意图测试通过；显式中文保存/更正/忘记已实现并真实 Web 3/3。普通聊天不自动保存，含糊/假设/角色扮演拒绝写入现实事实。旧 M01 首轮 19/20 失败记录保留，最新 20 事实负载下音乐题再测 1/1。跨天、广泛自然语言自动抽取、关系/事件及完整生命周期仍待完成。
+- P2 最小插件与人格：进行中。20 个开发场景均已有旧版采样，发现 P15 隐私表述和 P19 虚构日常经历问题。修订人格后正在完整重采开发场景，并扩展 P04 至 8 轮，独立保留题尚未正式评估。不将未评分采样当成准出。
+- P3 单渠道记忆：进行中。schema 3 加法迁移已部署；受控自动提取默认关闭，可按主体开启，冲突等待确认，时间变化及明确更正可更新；新增称呼/边界关系视图、本人报告事件与共同计划。删除/停用/自动开关作废候选及旧票据，旧快照重放最新删除与开关。64 项整体本地检查通过，真实自动记忆 20/20+关联 7/7；迁移前真实库隔离恢复通过，未激活隔离库。规则覆盖不能代表任意中文语义，跨天与手机新版待验，未冻结 MVP。
 - P4 主动行为：未开始。未创建日程、发件队列或真实外发。
 - P5 媒体与 B 站：未开始。未安装相关工具或配置登录 Cookie。
 - P6 第二平台与运行观察：未开始。无跨平台绑定或持续运行证据。
@@ -36,11 +36,13 @@ AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROO
 
 v0.2 新增私有证据：natural 的 cb8b40f0fff74818858275fcfad53b86、persona 的 9babd6a41b424399adb3adc49abc76bb、privacy 的 8af5b50bae094d1aac76b8e3a3238bb6、retrieval 的 e90d4d54cb3446988072c5702305c811，均为 memory-evaluation-<ID>.local.json，活跃合成记忆和临时 key 清理均为 true；提供商对照为 thinking-comparison-efa46607b4344072b74201f730bb7ca3.local.json。对照脚本停止 AstrBot 后独占配额，结束后已重启服务，无手机投递验证。
 
+v0.3 私有证据 memory-evaluation-cafd39ac88a44760a5027fa7738d95e6.local.json：27/27 自动内容检查、候选/开关/导出/删除操作检查通过，合成活跃数据及临时 key 清理均为 true。backups/before-v0.3.sqlite 保留迁移前一致性快照；v0.3-migration-quarantine.sqlite 为真实旧库隔离迁移验证，未用于在线对话。schema 3 不可直接用旧版代码启动，回退限制见 docs/backup_restore.md。
+
 ## 下一步
 
-先完整回归真实 Web 记忆，再补 P2 全部开发场景和独立保留题评估；完善 P3 抽取、关系/事件与生命周期，继续推进可独立完成的后续模块。用户醒后再做手机正式文字、媒体及主动观察；原生语音冲突、平台资格与真实跨天单列待验证，不阻塞本地开发。保持 GitHub 检查点，不以 DeepSeek 配额自行结束目标。
+完整真实 Web 显式与自动记忆回归已通过。正在补 P2 修订人格的完整开发场景和独立保留题评估，随后继续生命周期及可独立实现的后续模块。手机正式文字/媒体/主动观察、原生语音冲突、平台资格及真实跨天保持待验证。保持 GitHub 检查点，不以 DeepSeek 配额自行结束目标。
 
-本地启动：powershell -File F:/chatbot/scripts/start.ps1；停止：scripts/stop.ps1 会留下 STOP 模型开关。测试重现及数据路径见 docs/environment.md。源码 plugins/astrbot_plugin_companion_core，SQLite schema v2；普通短期上下文最多 3 轮/24 小时，删除、更正或停用会清理，旧备份按最新账本重放失效。
+本地启动：powershell -File F:/chatbot/scripts/start.ps1；停止：scripts/stop.ps1 会留下 STOP 模型开关。测试重现及数据路径见 docs/environment.md。源码 plugins/astrbot_plugin_companion_core，SQLite schema v3；普通短期上下文最多 3 轮/24 小时，删除、更正或停用会清理，旧备份按最新账本重放失效。
 
 ## 记录约定
 

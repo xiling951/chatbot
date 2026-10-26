@@ -1,4 +1,4 @@
-"""SQLite memory. No model-generated identities or automatic history extraction."""
+"""Scoped SQLite memory; trusted messages only, with independent deletion replay."""
 
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ class MemoryStore:
             raise RuntimeError("Latest deletion ledger missing; recovery refused")
         self.db = sqlite3.connect(self.path, timeout=10)
         self.db.row_factory = sqlite3.Row
-        if self.db.execute("PRAGMA user_version").fetchone()[0] > 2:
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 3:
             self.db.close()
             raise RuntimeError("Unsupported newer database schema; do not downgrade")
         self.db.executescript(Path(__file__).with_name("schema.sql").read_text())
@@ -50,6 +50,7 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS ledger.deleted(id TEXT PRIMARY KEY, scope TEXT NOT NULL, source TEXT NOT NULL, at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS ledger.blocked(scope TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(scope,source));
             CREATE TABLE IF NOT EXISTS ledger.policies(scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS ledger.automatic(scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
         """)
         row = self.db.execute("SELECT id FROM ledger.meta").fetchone()
         ledger_id = row[0] if row else uuid.uuid4().hex
@@ -71,6 +72,18 @@ class MemoryStore:
             )
             self.db.execute(
                 "DELETE FROM turns WHERE revision != COALESCE((SELECT revision FROM ledger.revisions WHERE ledger.revisions.scope=turns.scope),0)"
+            )
+            self.db.execute(
+                "DELETE FROM events WHERE id IN (SELECT id FROM ledger.deleted)"
+            )
+            self.db.execute(
+                "DELETE FROM candidates WHERE id IN (SELECT id FROM ledger.deleted) OR revision != COALESCE((SELECT revision FROM ledger.revisions WHERE ledger.revisions.scope=candidates.scope),0) OR source IN (SELECT source FROM ledger.blocked WHERE ledger.blocked.scope=candidates.scope)"
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO memory_preferences(scope) SELECT scope FROM scopes"
+            )
+            self.db.execute(
+                "UPDATE memory_preferences SET automatic=(SELECT enabled FROM ledger.automatic WHERE ledger.automatic.scope=memory_preferences.scope) WHERE scope IN (SELECT scope FROM ledger.automatic)"
             )
 
     def close(self):
@@ -97,6 +110,13 @@ class MemoryStore:
             ).fetchone()[0]
             scope = digest(persona, person, visibility)
             self.db.execute("INSERT OR IGNORE INTO scopes(scope) VALUES(?)", (scope,))
+            self.db.execute(
+                "INSERT OR IGNORE INTO memory_preferences(scope) VALUES(?)", (scope,)
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO scope_metadata VALUES(?,?,?,?)",
+                (scope, persona, person, visibility),
+            )
         return scope
 
     def begin(self, scope: str, source: str) -> Ticket:
@@ -114,68 +134,258 @@ class MemoryStore:
         correction=False,
         source_type="user_explicit",
     ) -> str:
-        predicate, value = predicate.strip(), value.strip()
+        predicate, value = self._validate_fact(predicate, value)
         if source_type != "user_explicit":
             raise ValueError("Only explicit user facts are accepted in this MVP")
+        with self.db:
+            self._check_ticket(ticket)
+            return self._write_fact(ticket, predicate, value, correction=correction)
+
+    @staticmethod
+    def _validate_fact(predicate: str, value: str) -> tuple[str, str]:
+        predicate, value = predicate.strip(), value.strip()
         if not predicate or len(predicate) > 50 or not value or len(value) > 300:
             raise ValueError("Invalid fact length")
         if re.search(
-            r"密码|密钥|身份证|银行卡|token|api.?key", predicate + value, re.I
+            r"密码|密钥|身份证|银行卡|手机号|电话号码|token|api.?key|\d{7,}|[\w.+-]+@[\w.-]+\.[a-z]{2,}",
+            predicate + value,
+            re.I,
         ):
             raise ValueError("Sensitive credential/identifier memory is disabled")
+        return predicate, value
+
+    def _check_ticket(self, ticket: Ticket):
+        # Obtain the SQLite write lock before checking permission/generation.
+        self.db.execute(
+            "UPDATE scopes SET enabled=enabled WHERE scope=?", (ticket.scope,)
+        )
+        enabled = self.db.execute(
+            "SELECT enabled FROM scopes WHERE scope=?", (ticket.scope,)
+        ).fetchone()
+        blocked = self.db.execute(
+            "SELECT 1 FROM ledger.blocked WHERE scope=? AND source=?",
+            (ticket.scope, ticket.source),
+        ).fetchone()
+        if (
+            not enabled
+            or not enabled[0]
+            or self.begin(ticket.scope, "unused").revision != ticket.revision
+            or blocked
+        ):
+            raise ValueError("Memory disabled or stale/deleted source")
+
+    def _write_fact(
+        self, ticket: Ticket, predicate: str, value: str, *, correction: bool
+    ) -> str:
+        old = self.db.execute(
+            "SELECT * FROM facts WHERE scope=? AND predicate=? AND status='active'",
+            (ticket.scope, predicate),
+        ).fetchone()
+        if old and old["value"] == value:
+            return old["id"]
+        if old and not correction:
+            raise ValueError("Conflicting fact; use /更正 属性=值 explicitly")
+        if old:
+            self._purge(ticket.scope, predicate)
+        fact_id = uuid.uuid4().hex
+        self.db.execute(
+            "INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                fact_id,
+                ticket.scope,
+                predicate,
+                value,
+                ticket.source,
+                "user_explicit",
+                old["version"] + 1 if old else 1,
+                "active",
+                old["id"] if old else None,
+                now(),
+                now(),
+            ),
+        )
+        return fact_id
+
+    def automatic_enabled(self, scope: str) -> bool:
+        row = self.db.execute(
+            "SELECT s.enabled,p.automatic FROM scopes s JOIN memory_preferences p ON s.scope=p.scope WHERE s.scope=?",
+            (scope,),
+        ).fetchone()
+        return bool(row and row[0] and row[1])
+
+    def set_automatic(self, scope: str, enabled: bool):
         with self.db:
             self.db.execute(
-                "UPDATE scopes SET enabled=enabled WHERE scope=?", (ticket.scope,)
+                "UPDATE memory_preferences SET automatic=? WHERE scope=?",
+                (int(enabled), scope),
             )
-            current = self.begin(ticket.scope, "unused").revision
-            enabled = self.db.execute(
-                "SELECT enabled FROM scopes WHERE scope=?", (ticket.scope,)
-            ).fetchone()
-            blocked = self.db.execute(
-                "SELECT 1 FROM ledger.blocked WHERE scope=? AND source=?",
-                (ticket.scope, ticket.source),
-            ).fetchone()
-            if not enabled or not enabled[0] or current != ticket.revision or blocked:
-                raise ValueError("Memory disabled or stale/deleted source")
+            self.db.execute(
+                "INSERT INTO ledger.automatic VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled",
+                (scope, int(enabled)),
+            )
+            self._invalidate_pending(scope)
+
+    def apply_statement(
+        self, ticket: Ticket, predicate: str, value: str, *, correction=False
+    ) -> tuple[str, str]:
+        """Save a grounded statement or retain an unresolved conflict, never overwrite by recency."""
+        predicate, value = self._validate_fact(predicate, value)
+        with self.db:
+            self._check_ticket(ticket)
+            if not self.automatic_enabled(ticket.scope):
+                raise ValueError("Automatic memory is disabled")
             old = self.db.execute(
-                "SELECT * FROM facts WHERE scope=? AND predicate=? AND status='active'",
+                "SELECT id,value FROM facts WHERE scope=? AND predicate=? AND status='active'",
                 (ticket.scope, predicate),
             ).fetchone()
-            if old and old["value"] == value:
-                return old["id"]
-            if old and not correction:
-                raise ValueError("Conflicting fact; use /更正 属性=值 explicitly")
-            if old:
-                self._purge(ticket.scope, predicate)
-            fact_id = uuid.uuid4().hex
+            if not old or old["value"] == value or correction:
+                return "saved", self._write_fact(
+                    ticket, predicate, value, correction=correction
+                )
+            # One outstanding value per key keeps confirmation understandable and bounded.
+            for row in self.db.execute(
+                "SELECT id,source FROM candidates WHERE scope=? AND predicate=?",
+                (ticket.scope, predicate),
+            ).fetchall():
+                self.db.execute(
+                    "INSERT OR IGNORE INTO ledger.deleted VALUES(?,?,?,?)",
+                    (row["id"], ticket.scope, row["source"], now()),
+                )
             self.db.execute(
-                "INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                "DELETE FROM candidates WHERE scope=? AND predicate=?",
+                (ticket.scope, predicate),
+            )
+            candidate_id = uuid.uuid4().hex
+            self.db.execute(
+                "INSERT INTO candidates VALUES(?,?,?,?,?,?,?,?)",
                 (
-                    fact_id,
+                    candidate_id,
                     ticket.scope,
                     predicate,
                     value,
                     ticket.source,
-                    source_type,
-                    old["version"] + 1 if old else 1,
-                    "active",
-                    old["id"] if old else None,
-                    now(),
+                    ticket.revision,
+                    old["id"],
                     now(),
                 ),
             )
-        return fact_id
+            return "pending", candidate_id
 
-    def _purge(self, scope: str, predicate: str | None):
-        # Called within the same cross-database transaction as the mutation.
+    def candidates(self, scope: str) -> list[dict]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM candidates WHERE scope=? ORDER BY created_at", (scope,)
+            )
+        ]
+
+    def confirm(self, scope: str, candidate_id: str) -> str:
+        if not re.fullmatch(r"[0-9a-f]{12,32}", candidate_id):
+            raise ValueError("请提供待确认条目的 12–32 位编号。")
+        with self.db:
+            self.db.execute("UPDATE scopes SET enabled=enabled WHERE scope=?", (scope,))
+            rows = self.db.execute(
+                "SELECT * FROM candidates WHERE scope=? AND id LIKE ?",
+                (scope, candidate_id + "%"),
+            ).fetchall()
+            if len(rows) != 1:
+                raise ValueError("待确认条目不存在或编号不唯一。")
+            row = rows[0]
+            ticket = Ticket(scope, row["source"], row["revision"])
+            self._check_ticket(ticket)
+            if (
+                not self.automatic_enabled(scope)
+                or not self.db.execute(
+                    "SELECT 1 FROM facts WHERE scope=? AND predicate=? AND id=?",
+                    (scope, row["predicate"], row["base_id"]),
+                ).fetchone()
+            ):
+                raise ValueError("待确认条目已失效，请重新提供事实。")
+            self.db.execute("DELETE FROM candidates WHERE id=?", (row["id"],))
+            return self._write_fact(
+                ticket, row["predicate"], row["value"], correction=True
+            )
+
+    def _invalidate_pending(self, scope: str):
         rows = self.db.execute(
-            "SELECT id,source FROM facts WHERE scope=? AND (? IS NULL OR predicate=?)",
-            (scope, predicate, predicate),
+            "SELECT id,source FROM candidates WHERE scope=?", (scope,)
         ).fetchall()
+        for row in rows:
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.deleted VALUES(?,?,?,?)",
+                (row["id"], scope, row["source"], now()),
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.blocked VALUES(?,?)",
+                (scope, row["source"]),
+            )
+        self.db.execute("DELETE FROM candidates WHERE scope=?", (scope,))
         self.db.execute(
             "INSERT INTO ledger.revisions VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET revision=revision+1",
             (scope,),
         )
+        self.db.execute("DELETE FROM turns WHERE scope=?", (scope,))
+
+    def record_event(self, ticket: Ticket, kind: str, content: str) -> str:
+        if kind not in ("user_reported", "shared_plan"):
+            raise ValueError(
+                "只有本人陈述的事件或共同计划可记录；不能把 AI 自述当作已核实活动。"
+            )
+        _, content = self._validate_fact("共同事件", content)
+        with self.db:
+            self._check_ticket(ticket)
+            event_id = uuid.uuid4().hex
+            self.db.execute(
+                "INSERT INTO events VALUES(?,?,?,?,?,?,?,?)",
+                (
+                    event_id,
+                    ticket.scope,
+                    kind,
+                    content,
+                    ticket.source,
+                    "user_explicit",
+                    now(),
+                    now(),
+                ),
+            )
+        return event_id
+
+    def events(self, scope: str) -> list[dict]:
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM events WHERE scope=? ORDER BY created_at DESC", (scope,)
+            )
+        ]
+
+    def relationship(self, scope: str) -> list[dict]:
+        enabled = self.db.execute(
+            "SELECT enabled FROM scopes WHERE scope=?", (scope,)
+        ).fetchone()
+        if not enabled or not enabled[0]:
+            return []
+        return [
+            dict(r)
+            for r in self.db.execute(
+                "SELECT * FROM relationships WHERE scope=? ORDER BY updated_at DESC",
+                (scope,),
+            )
+        ]
+
+    def _purge(self, scope: str, predicate: str | None):
+        # Called within the same cross-database transaction as the mutation.
+        rows = list(
+            self.db.execute(
+                "SELECT id,source FROM facts WHERE scope=? AND (? IS NULL OR predicate=?)",
+                (scope, predicate, predicate),
+            ).fetchall()
+        )
+        if predicate is None or predicate == "共同事件":
+            rows += self.db.execute(
+                "SELECT id,source FROM events WHERE scope=?", (scope,)
+            ).fetchall()
+            self.db.execute("DELETE FROM events WHERE scope=?", (scope,))
+        self._invalidate_pending(scope)
         for row in rows:
             self.db.execute(
                 "INSERT OR IGNORE INTO ledger.deleted VALUES(?,?,?,?)",
@@ -204,11 +414,7 @@ class MemoryStore:
                 "INSERT INTO ledger.policies VALUES(?,?) ON CONFLICT(scope) DO UPDATE SET enabled=excluded.enabled",
                 (scope, int(enabled)),
             )
-            self.db.execute(
-                "INSERT INTO ledger.revisions VALUES(?,1) ON CONFLICT(scope) DO UPDATE SET revision=revision+1",
-                (scope,),
-            )
-            self.db.execute("DELETE FROM turns WHERE scope=?", (scope,))
+            self._invalidate_pending(scope)
 
     def history(self, scope: str, conversation: str, budget=4000) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -327,8 +533,10 @@ class MemoryStore:
         return cursor.rowcount == 1
 
     def backup(self, destination: Path):
-        if Path(destination).resolve() in (self.path.resolve(), self.ledger.resolve()):
-            raise ValueError("Backup must use a different path")
+        if Path(destination).exists():
+            raise ValueError(
+                "Backup requires a fresh path; existing snapshots are preserved"
+            )
         with closing(sqlite3.connect(destination)) as target:
             self.db.backup(target)
 

@@ -39,9 +39,12 @@ else:
     )
     try:
         integrity = store.db.execute("PRAGMA integrity_check").fetchone()[0]
-        remaining_deleted = store.db.execute(
-            "SELECT count(*) FROM facts WHERE id IN (SELECT id FROM ledger.deleted)"
-        ).fetchone()[0]
+        remaining_deleted = sum(
+            store.db.execute(
+                f"SELECT count(*) FROM {table} WHERE id IN (SELECT id FROM ledger.deleted)"
+            ).fetchone()[0]
+            for table in ("facts", "events", "candidates")
+        )
         if integrity != "ok" or remaining_deleted:
             raise SystemExit("Quarantine validation failed; do not activate")
         print(

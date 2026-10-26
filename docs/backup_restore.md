@@ -9,7 +9,7 @@ python F:/chatbot/scripts/memory_admin.py backup C:/Users/Lenovo/AppData/Local/C
 python F:/chatbot/scripts/memory_admin.py restore C:/Users/Lenovo/AppData/Local/CompanionCore/runtime/data/plugin_data/companion_core/backups/memory-backup.sqlite C:/Users/Lenovo/AppData/Local/CompanionCore/runtime/data/plugin_data/companion_core/backups/memory-quarantine-new.sqlite
 ```
 
-backup 使用 SQLite backup API。restore 必须选择不存在的隔离目标，携带当前独立 deletions.sqlite；按删除 ID 清除旧事实、清除旧代次 turns 并重放停用策略，然后检查 integrity_check 和删除残留。脚本不切换在线服务。backups 目录本轮已创建并有一次真实运行库的合成测试恢复证据。
+backup 使用 SQLite backup API，要求目标不存在，避免覆盖已有快照。restore 必须选择不存在的隔离目标，携带当前独立 deletions.sqlite；清除已删事实/事件/候选及旧代次 turns，重放停用和自动记忆策略，然后检查 integrity_check 和删除残留。脚本不切换在线服务。schema 2 的 before-v0.3.sqlite 已用当前 schema 3 代码实际隔离迁移，完整性与删除重放通过，未激活为服务库。
 
 激活前停止实例，验证隔离库的身份/范围/事实/版本及删除回归，保留当前配置与回退快照，再用已验证的隔离库替换正式库。继续使用最新账本，不能退回旧账本；无法证明账本最新时保持离线。数据库内保存 ledger UUID，缺失或不同来源的账本会拒绝启动，但 UUID 本身不能证明账本足够新。
 
@@ -30,4 +30,6 @@ F:/chatbot-runtime/AstrBot/.venv/Scripts/python.exe F:/chatbot-baseline/scripts/
 powershell -File F:/chatbot/scripts/start.ps1
 ```
 
-先确认 F:/chatbot-baseline 不存在；不要用 reset --hard 清除尚未保存的修改。当前 v0.1/v0.2 均为 schema 2，代码回退不需要恢复旧数据库，必须保持最新删除账本及调用配额。未来 schema 改变后先核对兼容性。v0.2 部署前另有受限的 backups/before-v0.2.sqlite，本轮没有把它激活为服务库。
+先确认 F:/chatbot-baseline 不存在；不要用 reset --hard 清除尚未保存的修改。上例仅展示独立取源码：当前 v0.3 为 schema 3，v0.1/v0.2 会拒绝直接读取新版库，不能照例直接降级在线数据库。优先在 schema 3 上修复或选择兼容版本。
+
+如确需回退 v0.2.1，选择 checkpoint-2026-10-26-v0.2.1 源码，用该版本恢复迁移前 backups/before-v0.3.sqlite 至新隔离库，并始终携带当前最新 deletions.sqlite。核对事实/范围/版本和删除回归后，再停止服务、保留完整新版私有库并激活隔离库。这样会丢失迁移后新写入内容，不能声称无损；不要回滚删除账本或不限次数授权。GitHub 仅备份源码，不保存这些私有数据。尚未执行旧代码在线激活或宣称降级演练通过。

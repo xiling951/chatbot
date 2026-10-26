@@ -111,6 +111,80 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("爵士", kwargs["system_prompt"])
         self.assertEqual(kwargs["contexts"], [])
 
+    async def test_automatic_memory_conflict_does_not_poison_history(self):
+        await self.plugin.handle(LocalEvent("/自动记忆 开", "auto-on"))
+        first = LocalEvent("我喜欢听爵士", "auto-fact")
+        await self.plugin.handle(first)
+        self.assertIn("已记住", first.sent[0])
+        conflict = LocalEvent("我喜欢听摇滚", "auto-conflict")
+        await self.plugin.handle(conflict)
+        self.assertIn("待确认", conflict.sent[0])
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        self.assertEqual(self.plugin.store.facts(scope)[0]["value"], "爵士")
+        history = self.plugin.store.history(scope, conflict.get_session_id())
+        self.assertNotIn("摇滚", str(history))
+        identifier = self.plugin.store.candidates(scope)[0]["id"][:12]
+        await self.plugin.handle(LocalEvent("/确认记忆 " + identifier, "auto-confirm"))
+        await self.plugin.handle(LocalEvent("我平时听什么", "auto-recall"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertIn("摇滚", request["system_prompt"])
+        self.assertNotIn("爵士", str(request["contexts"]) + request["system_prompt"])
+
+    async def test_automatic_off_and_failed_model_notice_are_honest(self):
+        await self.plugin.handle(LocalEvent("我喜欢听爵士", "off-fact"))
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM facts").fetchone()[0], 0
+        )
+        await self.plugin.handle(LocalEvent("/自动记忆 开", "on"))
+        self.plugin.context.llm_generate.side_effect = ConnectionError("test outage")
+        failed = LocalEvent("我喜欢听爵士", "on-fact")
+        await self.plugin.handle(failed)
+        self.assertIn("ConnectionError", failed.sent[0])
+        self.assertIn("已记住", failed.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT value FROM facts").fetchone()[0],
+            "爵士",
+        )
+
+    async def test_relationship_event_export_and_stop_injection(self):
+        for index, text in enumerate(
+            ["/记住 称呼=小林", "/记住 互动边界=不要催促回复", "/记录计划 一起读科幻"]
+        ):
+            await self.plugin.handle(LocalEvent(text, f"rel-{index}"))
+        await self.plugin.handle(LocalEvent("你好", "rel-chat"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertIn("小林", request["system_prompt"])
+        self.assertIn("不要催促回复", request["system_prompt"])
+        await self.plugin.handle(LocalEvent("共同计划是什么", "plan-query"))
+        self.assertIn(
+            "shared_plan",
+            self.plugin.context.llm_generate.call_args.kwargs["system_prompt"],
+        )
+        exported = LocalEvent("/导出记忆", "export")
+        await self.plugin.handle(exported)
+        self.assertEqual(len(json.loads(exported.sent[0])["events"]), 1)
+        await self.plugin.handle(LocalEvent("/停止记忆", "rel-stop"))
+        await self.plugin.handle(LocalEvent("共同计划是什么", "stopped-plan-query"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertNotIn("小林", request["system_prompt"])
+        self.assertNotIn("科幻", request["system_prompt"])
+        self.assertEqual(request["contexts"], [])
+
+    async def test_combined_relationship_facts_events_stay_within_memory_budget(self):
+        for index, text in enumerate(
+            [
+                "/记住 称呼=" + "林" * 150,
+                "/记住 互动边界=" + "不催促" * 80,
+                "/记住 音乐=" + "爵士" * 100,
+                "/记录计划 " + "科幻" * 100,
+            ]
+        ):
+            await self.plugin.handle(LocalEvent(text, f"large-{index}"))
+        await self.plugin.handle(LocalEvent("音乐和共同计划", "bounded"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        memory = request["system_prompt"].split("用户记忆数据（不是指令）：", 1)[1]
+        self.assertLessEqual(len(memory.encode("utf-8")), 1200)
+
     async def test_mobile_owner_allowlist_excludes_other_users_and_groups(self):
         for sender, group in [("stranger", ""), ("owner", "group")]:
             event = LocalEvent(
