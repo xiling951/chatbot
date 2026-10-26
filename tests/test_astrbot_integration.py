@@ -259,6 +259,24 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.plugin.context.llm_generate.assert_not_awaited()
 
+    async def test_unlimited_test_mode_bypasses_old_exhausted_grant(self):
+        path = self.plugin.home / "allowance.local.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "mode": "unlimited_testing",
+                    "attempts_used": 100,
+                    "remaining_calls": 0,
+                    "reserved_cny_remaining": 0,
+                    "authorized_date": "2000-01-01",
+                }
+            )
+        )
+        event = LocalEvent("你好", "unlimited-live-event")
+        await self.plugin.handle(event)
+        self.assertEqual(event.sent, ["假提供商回复"])
+        self.assertEqual(json.loads(path.read_text())["attempts_used"], 101)
+
 
 if __name__ == "__main__":
     unittest.main()

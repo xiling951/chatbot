@@ -94,3 +94,21 @@ class AllowanceTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.initial))
         self.grant("--extend", "--calls", "10", "--daily-cny", "5")
         self.assertEqual(json.loads(self.path.read_text())["daily_limit_cny"], 3)
+
+    def test_explicit_unlimited_preserves_attempt_history_and_removes_caps(self):
+        self.initial.update(attempts_used=100)
+        self.path.write_text(json.dumps(self.initial))
+        with self.assertRaises(SystemExit) as outcome:
+            self.grant("--unlimited-testing")
+        self.assertEqual(outcome.exception.code, 0)
+        current = json.loads(self.path.read_text())
+        self.assertEqual(current["mode"], "unlimited_testing")
+        self.assertEqual(current["attempts_used"], 100)
+        self.assertNotIn("remaining_calls", current)
+        self.assertNotIn("daily_limit_cny", current)
+        self.assertIn("superseded_limits", current)
+
+    def test_unlimited_cannot_be_implicitly_combined_with_finite_grant(self):
+        with self.assertRaises(SystemExit):
+            self.grant("--unlimited-testing", "--calls", "25")
+        self.assertEqual(json.loads(self.path.read_text()), self.initial)

@@ -15,3 +15,5 @@
 离线：40 项通过（19 存储、14 框架事件、4 配额、3 中文意图），模型/发送为假实现。真实：Web 中文记忆 3/3、隐私修复 1/1、最新检索复测 1/1；原 M01 首轮 19/20 等证据保留。图片/视频/文件暂时文本降级，音频只处理微信实际返回的云端转写，未转写不调用模型。微信新版行为留待人工验证，不能把 Web 或假事件当作设备端通过。
 
 [官方 AI 接口](https://docs.astrbot.app/dev/star/guides/ai.html)、[消息事件](https://docs.astrbot.app/dev/star/guides/listen-message-event.html)、[消息发送](https://docs.astrbot.app/dev/star/guides/send-message.html)。
+
+调用授权现由 call_policy.py 共享加锁记录；明确 mode=unlimited_testing 不检查旧计数、日期或费用预留，仍检查单次上下文大小，STOP 与模型开关在调用前生效。v0.2.1 本地检查 47 项通过，真实完整记忆回归 20/20 与关联 5/5。

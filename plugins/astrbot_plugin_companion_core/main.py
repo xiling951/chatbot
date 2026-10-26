@@ -4,8 +4,6 @@ import asyncio
 import json
 import time
 from dataclasses import asdict
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from pathlib import Path
 
 import yaml
@@ -22,9 +20,10 @@ from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 from .memory import MemoryStore
 from .memory_intent import normalize_memory_command
+from .call_policy import reserve_attempt
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped explicit memory", "0.2.0")
+@register("astrbot_plugin_companion_core", "local", "Scoped explicit memory", "0.2.1")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -170,21 +169,6 @@ class CompanionCore(Star):
                 else:
                     if len(text.encode("utf-8")) > 4000:
                         raise ValueError("测试阶段单条消息最多 4000 UTF-8 字节。")
-                    # The atomic allowance counts attempts, including timeouts. Provider
-                    # config has one key and SDK retries disabled; no tool loops are used.
-                    usage_path = self.home / "allowance.local.json"
-                    allowance = json.loads(usage_path.read_text(encoding="utf-8"))
-                    today = datetime.now(ZoneInfo("America/Tijuana")).date().isoformat()
-                    if allowance.get("authorized_date") != today:
-                        raise ValueError("测试授权日期已过期；没有自动续费或重置额度。")
-                    reservation = allowance.get("reservation_per_call_cny", 0.2)
-                    if not 0.05 <= reservation <= 0.2:
-                        raise ValueError("调用费用预留配置无效。")
-                    if (
-                        allowance["remaining_calls"] <= 0
-                        or allowance.get("reserved_cny_remaining", 0) < reservation
-                    ):
-                        raise ValueError("本轮真实模型测试额度已用完。")
                     facts = self.store.recall(scope, text)
                     ticket = self.store.begin(scope, message_id)
                     history = self.store.history(scope, event.get_session_id())
@@ -218,18 +202,9 @@ class CompanionCore(Star):
                             + "".join(turn["content"] for turn in history)
                         ).encode("utf-8")
                     )
-                    # Flash peak CNY rates: input 2/M, output 8/M. Even with
-                    # 2048 protocol tokens and 512 output tokens, this fits 0.05.
-                    if content_bytes > 13000:
-                        raise ValueError("上下文超过本轮费用预留对应的输入上限。")
-                    allowance["remaining_calls"] -= 1
-                    allowance["attempts_used"] = allowance.get("attempts_used", 0) + 1
-                    allowance["reserved_cny_remaining"] = round(
-                        allowance["reserved_cny_remaining"] - reservation, 4
+                    attempt = reserve_attempt(
+                        self.home / "allowance.local.json", content_bytes
                     )
-                    temp = usage_path.with_suffix(".tmp")
-                    temp.write_text(json.dumps(allowance), encoding="utf-8")
-                    temp.replace(usage_path)
                     started = time.monotonic()
                     response = await asyncio.wait_for(
                         self.context.llm_generate(
@@ -253,6 +228,7 @@ class CompanionCore(Star):
                                         scope, message_id
                                     ).source,
                                     "seconds": round(time.monotonic() - started, 3),
+                                    "attempt": attempt,
                                     "usage": asdict(token_usage)
                                     if token_usage
                                     else None,

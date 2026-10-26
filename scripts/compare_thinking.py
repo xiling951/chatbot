@@ -6,16 +6,18 @@ persona score. Keys and reasoning text are never printed or saved.
 """
 
 import json
-import os
+import sys
+from pathlib import Path
 import socket
 import time
 import uuid
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import yaml
 from openai import OpenAI
 from local_paths import DATA, PLUGIN_DATA
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from plugins.astrbot_plugin_companion_core.call_policy import reserve_attempt
 
 
 def main():
@@ -53,28 +55,9 @@ def main():
     ) as client:
         for thinking, text in cases:
             allowance_path = PLUGIN_DATA / "allowance.local.json"
-            allowance = json.loads(allowance_path.read_text(encoding="utf-8"))
-            today = datetime.now(ZoneInfo("America/Tijuana")).date().isoformat()
-            if (
-                allowance.get("authorized_date") != today
-                or allowance["remaining_calls"] <= 0
-                or allowance["reserved_cny_remaining"] < 0.05
-            ):
-                break
-            if len((persona["system_prompt"] + text).encode("utf-8")) > 13000:
-                raise SystemExit("Prompt exceeds the reserved request size")
-            allowance["remaining_calls"] -= 1
-            allowance["attempts_used"] = allowance.get("attempts_used", 0) + 1
-            allowance["reserved_cny_remaining"] = round(
-                allowance["reserved_cny_remaining"] - 0.05, 4
+            attempt = reserve_attempt(
+                allowance_path, len((persona["system_prompt"] + text).encode("utf-8"))
             )
-            # The service is stopped, so there is no concurrent reader/writer.
-            # Flush in place after this host returned EXDEV for os.replace;
-            # no concurrent service reader/writer exists during this probe.
-            with allowance_path.open("w", encoding="utf-8") as grant:
-                json.dump(allowance, grant)
-                grant.flush()
-                os.fsync(grant.fileno())
             started = time.monotonic()
             result = {
                 "thinking": thinking,
@@ -118,6 +101,7 @@ def main():
                         json.dumps(
                             {
                                 "trace_id": uuid.uuid4().hex,
+                                "attempt": attempt,
                                 "seconds": round(time.monotonic() - started, 3),
                                 "usage": counts,
                                 "thinking": thinking,

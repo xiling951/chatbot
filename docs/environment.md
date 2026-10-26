@@ -7,14 +7,14 @@
 - 管理账号保存在 `C:/Users/Lenovo/AppData/Local/CompanionCore/runtime/data/admin.local.json`，不要提交或在聊天中粘贴密码。NTFS runtime 根目录已移除继承权限，实际 ACL 仅当前用户 Lenovo 和 SYSTEM 完全控制；不能只凭 icacls 返回成功判断 exFAT 已受限。
 - 模型凭据经用户明确授权，从当前桌面版 `C:/Users/Lenovo/AppData/Roaming/dsh-desktop/harness/.credentials.yaml` 读取，仅写入运行目录 cmd_config.json，不修改 DSH。旧 ~/.dsh 保存无效历史密钥，不能作为当前配置。支持显式 --dsh-home。运行配置采用 provider_sources + provider_source_id 结构。
 - 普通模型请求关闭思考，无工具/搜索；最长输入 4000 UTF-8 字节，记忆另限 1200、历史另限 4000 UTF-8 字节，输出上限 512 tokens，超时 35 秒；提供商 request_max_retries=1（总尝试一次），SDK 重试关闭。
-- 授权：2026-10-26 初始 25 次后追加 60 次，本轮在同一 5 元日上限内再配置 15 次；累计尝试 100，成功 99、失败 1，余 0 次。按 Flash 峰值人民币输入 2 元/百万、输出 8 元/百万，总内容 13000 UTF-8 字节、输出 512 tokens，每次保守预留 0.05 元，旧调用计入每日已用。保守余额为 0 不等于实付 5 元；按已记录用量估计峰值费用上界约 0.058212 元，实付未核账。过期不续额、重启不重置。[官方价格](https://api-docs.deepseek.com/zh-cn/quick_start/pricing/)。其他程序同密钥费用不在此观测范围。
+- 最新授权：DeepSeek 项目测试不限次数，用户的额度上限指 Codex。使用 mode=unlimited_testing，不检查旧次数、每日预留或日期到期，累计尝试和用量继续记录。旧有限模式仅保留给显式选择的回退，不是当前限制。请求超时、有限重试、输入大小与 STOP 开关不变；实际费用按用量观察。
 - 日志 WARNING，不打印聊天正文或密钥；成功模型请求记录独立用量及耗时。插件短期上下文与 WebChat 界面历史分别管理，见 data_lifecycle.md。
 
 启动：`powershell -File F:/chatbot/scripts/start.ps1`。停止：`powershell -File F:/chatbot/scripts/stop.ps1`；停止会留下模型 STOP 文件，后续启动不会自动移除。开机自动启动尚未注册，避免未验收时自动联网。
 
 部署插件：运行目录虚拟环境的 python 执行 `F:/chatbot/scripts/deploy_local.py`，然后重启。只有明确更新密钥时追加 `--reuse-dsh`；此命令本身不发模型请求。管理密码只有显式 `--reset-local-admin` 才重置。复用脚本不会增加模型额度。
 
-明确追加调用授权时使用 authorize_test.py --extend --calls N --daily-cny 5；脚本保留当日已用次数、拒绝自动跨日/提高既有日上限，并核对官方 Flash 模型、关闭思考、512 输出和一次尝试配置。现有“更多调用”授权无需反复询问，超 5 元才需新预算决定。evaluate_memory.py 是受控真实 Web 验收，不代表微信设备测试；默认会用 25 次模型，可用 --m01-indices 1 只重测失败事实及 5 项关联检查。
+当前授权配置命令：authorize_test.py --unlimited-testing，保留既有累计尝试，旧限制移入 superseded_limits；不需要反复追加批次。有限模式 --calls/--daily-cny 仅供以后明确选择，不可偷偷覆盖当前授权。插件和提供商探针共享加锁的请求计数，避免并发丢失或加密盘临时替换错误。
 
 v0.2 可选择 --suite natural（3 次）、--suite privacy（1 次）、--suite retrieval --m01-indices 1（1 次），或 --suite persona --persona-start N --persona-cases K（2K 次，限开发题）。compare_thinking.py 必须先停止 AstrBot，独占同一配额后仅调用两次，不打印密钥或保存思维文本；结束后用 start.ps1 恢复服务。它不是工具或手机验收。
 

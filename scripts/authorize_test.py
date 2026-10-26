@@ -1,24 +1,59 @@
-"""Apply an explicitly approved finite test allowance; never auto-renew."""
+"""Apply host-side authorization; unlimited testing must be explicitly selected."""
 
 import argparse
 import json
-from datetime import datetime
+from datetime import datetime, timezone
+from filelock import FileLock
+import os
 from zoneinfo import ZoneInfo
 from local_paths import PLUGIN_DATA
 
 home = PLUGIN_DATA
 parser = argparse.ArgumentParser()
-parser.add_argument("--calls", required=True, type=int)
-parser.add_argument("--daily-cny", required=True, type=float)
+parser.add_argument("--calls", type=int)
+parser.add_argument("--daily-cny", type=float)
+parser.add_argument("--unlimited-testing", action="store_true")
 parser.add_argument(
     "--extend",
     action="store_true",
     help="Apply a newly explicit user authorization, preserving daily spending",
 )
 args = parser.parse_args()
+allowance_path = home / "allowance.local.json"
+if args.unlimited_testing:
+    if args.calls is not None or args.daily_cny is not None or args.extend:
+        raise SystemExit("Unlimited testing cannot be combined with a finite grant")
+    with FileLock(str(allowance_path) + ".lock", timeout=5):
+        old = json.loads(allowance_path.read_text(encoding="utf-8"))
+        record = {
+            "mode": "unlimited_testing",
+            "authorized_at": datetime.now(timezone.utc).isoformat(),
+            "authorization_scope": "project development and testing; no fixed DeepSeek call/day/monetary cap",
+            "attempts_used": old.get("attempts_used", 0),
+            "superseded_limits": old.get(
+                "superseded_limits",
+                {k: v for k, v in old.items() if k != "attempts_used"},
+            ),
+        }
+        with allowance_path.open("w", encoding="utf-8") as output:
+            json.dump(record, output, ensure_ascii=False, indent=2)
+            output.flush()
+            os.fsync(output.fileno())
+    settings_path = home / "settings.local.json"
+    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+    settings["model_enabled"] = True
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    (home / "STOP").unlink(missing_ok=True)
+    print(
+        "Explicit unlimited project-testing authorization enabled; attempt history preserved. No API request made."
+    )
+    raise SystemExit(0)
+if args.calls is None or args.daily_cny is None:
+    raise SystemExit(
+        "Select --unlimited-testing or provide a finite --calls/--daily-cny grant"
+    )
 if not 0 < args.calls <= (60 if args.extend else 25) or not 0 < args.daily_cny <= 5:
     raise SystemExit("Grant exceeds this workflow's call limit or CNY 5 daily cap")
-allowance_path = home / "allowance.local.json"
 old = json.loads(allowance_path.read_text(encoding="utf-8"))
 today = datetime.now(ZoneInfo("America/Tijuana")).date().isoformat()
 if old.get("authorized_date") and not args.extend:

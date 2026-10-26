@@ -4,9 +4,9 @@
 
 ## 当前状态
 
-P0 Web 基线通过，Companion Core 已部署 v0.2.0。40 项本地检查通过，新增自然语言显式记忆真实 Web 验证 3/3；修复了含糊删除及“完全不保存聊天”的不实表述，隐私回归 1/1。当前配置的调用次数与保守日预算余额均为 0，本轮按用户“额度耗尽”停止条件停止新增模型调用，未完成整个项目，也未将手机未测项目记为通过。
+用户已纠正停止条件：指 Codex 自身额度，DeepSeek 项目测试不限次数。此前以自设 DeepSeek 计数和 5 元预留停止是执行误解，已撤销。Companion Core v0.2.1 已部署，47 项本地检查通过；旧计数为 0 时真实 Web 普通聊天已恢复。不以 DeepSeek 批次数量或日期作为提前停止条件。
 
-AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 为 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（NTFS 仅 Lenovo/SYSTEM）。服务已恢复，免费记忆管理可用；普通模型回复受额度闸门阻断。
+AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 为 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（NTFS 仅 Lenovo/SYSTEM）。普通模型回复及免费记忆管理已恢复，保留超时、有限重试、停止开关与用量记录。用户休息期间手机人工验收继续暂挂。
 
 ## 已有交付
 
@@ -30,7 +30,7 @@ AstrBot v4.29.3 代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROO
 
 已授权复用 DSH 当前官方 DeepSeek 凭据；实际路径 C:/Users/Lenovo/AppData/Roaming/dsh-desktop/harness，勿误用 ~/.dsh 的历史失效密钥。免费模型列表 HTTP 200 和本项目真实模型响应已确认，不将用户提供的余额报告当成本项目测得账单。
 
-在用户已有追加授权和 5 元日上限内，原有 6 次之外再配置 15 次，未提高日预算。当前累计尝试 100、成功 99（旧密钥认证失败 1），余 0 次，保守预留余额 0。每次按 0.05 元请求上界占用，这是保守额度耗尽，不代表真实扣费 5 元或模型账户余额耗尽。按记录用量及官方人民币峰值价估算，上界约 0.058212 元；实付未核账，其他程序共用密钥费用不在此观测范围。
+最新授权：DeepSeek 项目测试不限次数，不受旧日费用预留或日期到期约束；用户说的额度上限属于 Codex，本项目账本不能推算 Codex 剩余额度。旧 100 次尝试/99 成功和约 0.058212 元峰值估计为历史证据，不再作为停止依据。新授权记录 mode=unlimited_testing 并保留累计计数，原有限配置归入 superseded_limits；请求级边界与人工停止仍有效，不运行无意义付费循环。
 
 本次真实验收使用临时 chat 权限 API key 和两个合成 Web 身份，不改本人微信事实；每次提问新建会话，避免答案由短期历史泄漏。两次执行均清理合成主体活跃记忆并删除临时 key。证据在私有插件目录 memory-evaluation-f49fd293e6364d598555bf25e498e71d.local.json、memory-evaluation-56101cc278f9403cae2e9b9d419aea5f.local.json。
 
@@ -38,7 +38,7 @@ v0.2 新增私有证据：natural 的 cb8b40f0fff74818858275fcfad53b86、persona
 
 ## 下一步
 
-用户醒后一起做新版中文记忆与媒体手机测试；补 P1 正式 30 条文字、10 个媒体及主动能力记录，再完成人格评分、剩余场景及 P3 生命周期。原生语音硬要求冲突仍需实际决定，跨天保持待观察。继续模型调用前先核对保守预留与实付差异，在已有 5 元授权范围内配置必要配额，不以本次停止推定获得更高预算，不重复请求同一已给授权。
+先完整回归真实 Web 记忆，再补 P2 全部开发场景和独立保留题评估；完善 P3 抽取、关系/事件与生命周期，继续推进可独立完成的后续模块。用户醒后再做手机正式文字、媒体及主动观察；原生语音冲突、平台资格与真实跨天单列待验证，不阻塞本地开发。保持 GitHub 检查点，不以 DeepSeek 配额自行结束目标。
 
 本地启动：powershell -File F:/chatbot/scripts/start.ps1；停止：scripts/stop.ps1 会留下 STOP 模型开关。测试重现及数据路径见 docs/environment.md。源码 plugins/astrbot_plugin_companion_core，SQLite schema v2；普通短期上下文最多 3 轮/24 小时，删除、更正或停用会清理，旧备份按最新账本重放失效。
 
