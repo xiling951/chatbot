@@ -1,0 +1,13 @@
+__pycache__/
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.sqlite*
+*.db
+*.log
+.env
+config/*.local.*
+reports/*_results.local.json
+*.local.*
+data/
+*.tmp

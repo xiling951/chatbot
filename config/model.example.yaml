@@ -1,0 +1,11 @@
+provider: openai_chat_completion
+api_base: https://api.deepseek.com
+model: deepseek-flash
+alias_mapping_checked: '2026-10-26: DeepSeek-V4.1-Flash-1017'
+api_key: '<仅在本机运行配置中填写；不提交>'
+timeout: 30
+custom_extra_body:
+  thinking: {type: disabled}
+  max_tokens: 512
+# No search, tools, TTS or background model loops in P0-P3.
+# Real calls remain disabled until a specific budget is authorized.
