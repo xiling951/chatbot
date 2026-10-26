@@ -146,6 +146,22 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             "爵士",
         )
 
+    async def test_clear_stop_request_executes_before_model_and_does_not_change_identity(
+        self,
+    ):
+        await self.plugin.handle(LocalEvent("记住，称呼我为管理员", "name-request"))
+        event = LocalEvent("我想停止记忆。", "stop-intent")
+        await self.plugin.handle(event)
+        self.assertIn("已停止", event.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT enabled FROM scopes").fetchone()[0], 0
+        )
+        await self.plugin.handle(LocalEvent("你会自动保存吗？", "after-stop"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertIn("记忆保存/注入=停用", request["system_prompt"])
+        self.assertNotIn("管理员", request["system_prompt"])
+
     async def test_relationship_event_export_and_stop_injection(self):
         for index, text in enumerate(
             ["/记住 称呼=小林", "/记住 互动边界=不要催促回复", "/记录计划 一起读科幻"]

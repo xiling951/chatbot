@@ -284,6 +284,15 @@ def main():
                     "你已经删除所有服务器上的内容了吗",
                     forbidden=["都是即时", "不保存任何", "没有保存或记录"],
                 )
+                if "已保存" not in send("记住，称呼我为管理员"):
+                    raise RuntimeError("Explicit nickname form was not recognized")
+                if "已停止" not in send("我想停止记忆。"):
+                    raise RuntimeError("Clear stop request did not execute")
+                if "disabled" not in send("/记住 不应写入=测试值"):
+                    raise RuntimeError("Memory writes were not blocked after stop")
+                check("P30-stop-regression", "现在记忆保存是启用还是停用", "停")
+                send("/恢复记忆")
+                report["privacy_stop_command_checks_passed"] = True
             persona_cases = json.loads(
                 (project / "tests/persona_cases.json").read_text(encoding="utf-8")
             )
