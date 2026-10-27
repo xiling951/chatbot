@@ -20,11 +20,11 @@ P0–P6 的编号已保留；P2 包含最小插件闭环，P3 不依赖跨平台
 
 ## 当前已完成与未完成
 
-已部署 AstrBot v4.29.3 与 Companion Core v0.4.1，代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 在 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（F 盘 exFAT 不支持 ACL）。136 项本地检查通过；新增可选自动记忆、冲突确认、关系与共同事件。真实 Web 自动记忆 20/20，关联生命周期问答 7/7；手机新版媒体和中文入口仍待人工验收。当前版本已建立 GitHub 基线回退标签，见 docs/backup_restore.md。勿重复部署或重置调用授权。
+已部署 AstrBot v4.29.3 与 Companion Core v0.4.2/schema 4，代码/环境在 F:/chatbot-runtime/AstrBot，实际私有 ASTRBOT_ROOT 读取忽略的 config/runtime_root.local.json（F 盘 exFAT 不支持 ACL，原 C 盘逻辑 AppData 受重定向影响）。150 项本地检查通过；真实 Web 自动记忆 20/20、关联生命周期 7/7、完整记忆 25/25。手机自动记忆/冲突/删除、语音输入和三类媒体降级已确认；原生语音单次回放探针已上线待手机反馈，不能称硬要求已满足。当前版本已建立 GitHub 基线回退标签，见 docs/backup_restore.md。勿重复部署或重置调用授权。
 
 已授权复用桌面版 DSH 当前凭据（AppData/Roaming/dsh-desktop/harness；默认 ~/.dsh 为旧无效密钥）。用户已明确 DeepSeek 测试调用不限次数，所说额度上限指 Codex；旧次数、5 元预留和日期闸门不再适用，不能以其耗尽停止。v0.2.1 不限次数模式已部署，真实 Web 验证普通聊天恢复。用户已返回，正在配合新版微信记忆验收；微信仅本人单聊获授权，原生语音气泡仍未满足。
 
-v0.4.1 主动队列与模拟风格已部署，主动发送默认关闭；两条本人微信定时测试等待临时免打扰授权，未安排外发。提醒时区已由用户指定为 Asia/Shanghai。
+主动队列与模拟风格已部署；两条限时本人微信定时测试均平台接受且用户确认收到，结束后总开关/会话授权已关闭，普通聊天正常。当日提交计数保留，提醒时区 Asia/Shanghai。P6 后台守护已注册并运行，真实退出恢复复测 51.626 秒；主机重启、断网及 72 小时/7 日观察仍未通过，见 reports/P6.md。
 
 ## 第一批应实际推进的工作
 

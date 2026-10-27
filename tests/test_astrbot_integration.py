@@ -422,6 +422,72 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(event.sent, ["已保存这条明确记忆。"])
         self.plugin.context.llm_generate.assert_not_awaited()
 
+    async def test_voice_probe_only_owner_private_one_sample_no_model_or_memory(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["weixin_oc"] = ["owner"]
+        settings["bot_account_ids"] = {"weixin_oc": "account-a"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        adapter = SimpleNamespace(
+            meta=lambda: SimpleNamespace(id="weixin_oc", name="weixin_oc")
+        )
+        self.plugin.context.platform_manager = SimpleNamespace(platform_insts=[adapter])
+        for sender, group in [("other", ""), ("owner", "group")]:
+            denied = LocalEvent(
+                "/语音气泡测试",
+                sender + group,
+                sender=sender,
+                platform="weixin_oc",
+                group=group,
+            )
+            await self.plugin.handle(denied)
+            self.assertEqual(denied.sent, [])
+        web = LocalEvent("/语音气泡测试", "web-probe")
+        await self.plugin.handle(web)
+        self.assertIn("仅支持", web.sent[0])
+        self.assertFalse((self.plugin.home / "voice-probe-state.local.json").exists())
+        owner = LocalEvent("/语音气泡测试", "arm", sender="owner", platform="weixin_oc")
+        await self.plugin.handle(owner)
+        self.assertIn("原样回放一次", owner.sent[0])
+
+        def voice_event(identifier):
+            event = LocalEvent("", identifier, sender="owner", platform="weixin_oc")
+            event.message_obj.message = [Record(file="not-opened.wav")]
+            event.message_obj.raw_message = {
+                "item_list": [{"type": 3, "voice_item": {"text": "记住，音乐是摇滚"}}]
+            }
+            return event
+
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.VoiceProbe.replay",
+            new_callable=AsyncMock,
+            return_value={"api_result": "accepted_by_platform"},
+        ) as replay:
+            sample = voice_event("sample")
+            await self.plugin.handle(sample)
+            await self.plugin.handle(sample)
+            replay.assert_awaited_once()
+            self.assertIn("请以手机", sample.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM facts").fetchone()[0], 0
+        )
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM turns").fetchone()[0], 0
+        )
+
+    async def test_voice_probe_stop_prevents_arming(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["weixin_oc"] = ["owner"]
+        settings["bot_account_ids"] = {"weixin_oc": "account-a"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        (self.plugin.home / "STOP").touch()
+        owner = LocalEvent(
+            "/语音气泡测试", "stopped-arm", sender="owner", platform="weixin_oc"
+        )
+        await self.plugin.handle(owner)
+        self.assertIn("运行开关", owner.sent[0])
+        self.assertFalse((self.plugin.home / "voice-probe-state.local.json").exists())
+
     async def test_actual_weixin_account_separates_bots_even_with_same_adapter_id(self):
         settings = json.loads(self.plugin.settings_path.read_text())
         settings["allowed_senders"]["weixin_oc"] = ["owner"]

@@ -32,9 +32,10 @@ from .delivery import DeliveryStore
 from .delivery_worker import DeliveryWorker, DefinitelyNotAccepted
 from .reminders import handle_reminder_command
 from .emotion import EmotionState
+from .voice_probe import VoiceProbe
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.1")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.2")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -184,6 +185,21 @@ class CompanionCore(Star):
             notice = ""
             try:
                 components = event.get_messages() or []
+                if text == "/语音气泡测试":
+                    if (
+                        event.get_platform_name() != "weixin_oc"
+                        or (self.home / "STOP").exists()
+                    ):
+                        reply = (
+                            "此测试仅支持已绑定的本人微信单聊，且须本机运行开关开启。"
+                        )
+                    else:
+                        VoiceProbe(self.home).arm(
+                            scope, event.unified_msg_origin, datetime.now(timezone.utc)
+                        )
+                        reply = "语音气泡测试已准备好，10分钟内请录制一条不超过10秒的专用测试语音（例如‘这是语音气泡测试’）。我会仅向此单聊原样回放一次，不生成或克隆音色，不保存为记忆。请观察是否出现可播放的原生语音气泡。"
+                    await event.send(event.plain_result(reply))
+                    return
                 if any(isinstance(part, (Image, Video, File)) for part in components):
                     await event.send(
                         event.plain_result(
@@ -193,6 +209,67 @@ class CompanionCore(Star):
                     return
                 if any(isinstance(part, Record) for part in components):
                     raw = getattr(event.message_obj, "raw_message", {})
+                    if event.get_platform_name() == "weixin_oc":
+                        probe = VoiceProbe(self.home)
+                        armed = probe.consume(
+                            scope, event.unified_msg_origin, datetime.now(timezone.utc)
+                        )
+                        if armed:
+                            adapter = next(
+                                (
+                                    p
+                                    for p in self.context.platform_manager.platform_insts
+                                    if p.meta().id == platform
+                                    and p.meta().name == "weixin_oc"
+                                ),
+                                None,
+                            )
+                            voices = (
+                                [
+                                    item.get("voice_item")
+                                    for item in raw.get("item_list", [])
+                                    if isinstance(item, dict) and item.get("type") == 3
+                                ]
+                                if isinstance(raw, dict)
+                                else []
+                            )
+
+                            def still_allowed():
+                                latest = json.loads(
+                                    self.settings_path.read_text(encoding="utf-8")
+                                )
+                                return (
+                                    not (self.home / "STOP").exists()
+                                    and sender
+                                    in latest.get("allowed_senders", {}).get(
+                                        platform, []
+                                    )
+                                    and latest.get("bot_account_ids", {}).get(platform)
+                                    == bot_account
+                                )
+
+                            if (
+                                adapter
+                                and len(voices) == 1
+                                and isinstance(voices[0], dict)
+                                and still_allowed()
+                            ):
+                                result = await probe.replay(
+                                    armed,
+                                    adapter,
+                                    sender,
+                                    voices[0],
+                                    allowed=still_allowed,
+                                )
+                                reply = (
+                                    "语音测试已提交给微信平台，请以手机是否显示并能播放语音气泡为准。"
+                                    if result["api_result"] == "accepted_by_platform"
+                                    else "这次语音气泡测试未确认提交成功，不会自动重试。普通文字聊天仍可使用。"
+                                )
+                            else:
+                                reply = "语音测试条件不符，本次未发送语音。请确认使用一条不超过10秒的微信录音。"
+                            await event.send(event.plain_result(reply))
+                            return
                     transcripts = (
                         [
                             str(item.get("voice_item", {}).get("text", "")).strip()

@@ -129,6 +129,14 @@ def main():
     print(
         "Deployed plugin; existing model allowance and enabled state preserved. No API calls made."
     )
+    (PROJECT / "config" / "runtime_root.local.json").write_text(
+        json.dumps(
+            {"runtime_root": str(config_path.resolve().parent.parent)},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

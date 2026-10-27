@@ -1,5 +1,7 @@
 $ErrorActionPreference = 'Stop'
-$taskData = Join-Path $env:LOCALAPPDATA 'CompanionCore\runtime\data'
+$taskRootConfig = Join-Path $PSScriptRoot '..\config\runtime_root.local.json'
+$taskRuntimeRoot = if (Test-Path -LiteralPath $taskRootConfig) { (Get-Content -LiteralPath $taskRootConfig -Raw -Encoding UTF8 | ConvertFrom-Json).runtime_root } else { Join-Path $env:LOCALAPPDATA 'CompanionCore\runtime' }
+$taskData = Join-Path $taskRuntimeRoot 'data'
 $taskPath = Join-Path $taskData 'companion-process.local.json'
 $taskStop = Join-Path $taskData 'plugin_data\companion_core\STOP'
 New-Item -ItemType File -Path $taskStop -Force | Out-Null
