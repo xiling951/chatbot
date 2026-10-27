@@ -15,6 +15,7 @@ from pathlib import Path
 import httpx
 from filelock import FileLock, Timeout
 from local_paths import PROJECT_ROOT, DATA, PLUGIN_DATA
+from local_backup import maybe_backup
 
 
 def read_json(path: Path):
@@ -230,7 +231,7 @@ def run_once(
 def prune_owned_logs(folder: Path, current: datetime, *, kind: str) -> int:
     patterns = {
         "availability": r"availability-(\d{4}-\d{2}-\d{2})\.local\.jsonl",
-        "startup": r"(?:stdout|stderr|watchdog-stdout|watchdog-stderr)-(\d{8})T\d{9}-[0-9a-f]{32}\.local\.log",
+        "startup": r"(?:(?:stdout|stderr|watchdog-stdout|watchdog-stderr)-(\d{8})T\d{9}-[0-9a-f]{32}|recovery-(\d{8})T\d{12})\.local\.log",
     }
     pattern = re.compile(patterns[kind])
     cutoff = current.date() - timedelta(days=8)
@@ -249,7 +250,7 @@ def prune_owned_logs(folder: Path, current: datetime, *, kind: str) -> int:
             continue
         try:
             day = datetime.strptime(
-                match[1], "%Y-%m-%d" if kind == "availability" else "%Y%m%d"
+                match[1] or match[2], "%Y-%m-%d" if kind == "availability" else "%Y%m%d"
             ).date()
         except ValueError:
             continue
@@ -313,6 +314,8 @@ def main():
                 prune_owned_logs(DATA / "companion_logs", now, kind="startup")
                 pruned_day = now.date()
             output = folder / f"availability-{now.date().isoformat()}.local.jsonl"
+            # Purely local encrypted snapshot, due every 24h. No paid/API/IM work.
+            result["local_backup"] = maybe_backup(now)
             with output.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(result, ensure_ascii=False) + "\n")
             save_state(state, policy.state)
