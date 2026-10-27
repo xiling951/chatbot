@@ -37,7 +37,7 @@ class MemoryStore:
             raise RuntimeError("Latest deletion ledger missing; recovery refused")
         self.db = sqlite3.connect(self.path, timeout=10)
         self.db.row_factory = sqlite3.Row
-        if self.db.execute("PRAGMA user_version").fetchone()[0] > 3:
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 4:
             self.db.close()
             raise RuntimeError("Unsupported newer database schema; do not downgrade")
         self.db.executescript(Path(__file__).with_name("schema.sql").read_text())
@@ -51,6 +51,8 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS ledger.blocked(scope TEXT NOT NULL, source TEXT NOT NULL, PRIMARY KEY(scope,source));
             CREATE TABLE IF NOT EXISTS ledger.policies(scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS ledger.automatic(scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS ledger.proactive(scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, enabled INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS ledger.submissions(idempotency_key TEXT PRIMARY KEY, scope TEXT NOT NULL, state TEXT NOT NULL, local_day TEXT NOT NULL, submitted_at TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at TEXT);
         """)
         row = self.db.execute("SELECT id FROM ledger.meta").fetchone()
         ledger_id = row[0] if row else uuid.uuid4().hex
@@ -73,6 +75,10 @@ class MemoryStore:
             self.db.execute(
                 "DELETE FROM turns WHERE revision != COALESCE((SELECT revision FROM ledger.revisions WHERE ledger.revisions.scope=turns.scope),0)"
             )
+            for table in ("emotions", "emotion_events"):
+                self.db.execute(
+                    f"DELETE FROM {table} WHERE revision != COALESCE((SELECT revision FROM ledger.revisions WHERE ledger.revisions.scope={table}.scope),0)"
+                )
             self.db.execute(
                 "DELETE FROM events WHERE id IN (SELECT id FROM ledger.deleted)"
             )
@@ -84,6 +90,23 @@ class MemoryStore:
             )
             self.db.execute(
                 "UPDATE memory_preferences SET automatic=(SELECT enabled FROM ledger.automatic WHERE ledger.automatic.scope=memory_preferences.scope) WHERE scope IN (SELECT scope FROM ledger.automatic)"
+            )
+            for table in ("tasks", "outbox"):
+                waiting = "('pending','running')" if table == "tasks" else "('queued')"
+                self.db.execute(
+                    f"UPDATE {table} SET state=CASE WHEN state IN {waiting} THEN 'cancelled' ELSE state END,content='' WHERE memory_revision != COALESCE((SELECT revision FROM ledger.revisions WHERE ledger.revisions.scope={table}.scope),0) OR auth_revision != COALESCE((SELECT revision FROM ledger.proactive WHERE ledger.proactive.scope={table}.scope),-1)"
+                )
+            self.db.execute(
+                "UPDATE outbox SET state=(SELECT state FROM ledger.submissions WHERE ledger.submissions.idempotency_key=outbox.idempotency_key),reason='authoritative_receipt_replayed' WHERE idempotency_key IN (SELECT idempotency_key FROM ledger.submissions WHERE state IN ('accepted_by_platform','unknown'))"
+            )
+            self.db.execute(
+                "UPDATE tasks SET state='cancelled',content='' WHERE id IN (SELECT id FROM ledger.deleted)"
+            )
+            self.db.execute(
+                "UPDATE executions SET state='cancelled',reason='task_cancelled' WHERE task_id IN (SELECT id FROM ledger.deleted) AND state IN ('pending','running')"
+            )
+            self.db.execute(
+                "UPDATE outbox SET state=CASE WHEN state='queued' THEN 'cancelled' ELSE state END,content='' WHERE execution_id IN (SELECT id FROM executions WHERE task_id IN (SELECT id FROM ledger.deleted))"
             )
 
     def close(self):
@@ -325,6 +348,42 @@ class MemoryStore:
             (scope,),
         )
         self.db.execute("DELETE FROM turns WHERE scope=?", (scope,))
+        for row in self.db.execute(
+            "SELECT id,source FROM emotion_events WHERE scope=?", (scope,)
+        ).fetchall():
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.deleted VALUES(?,?,?,?)",
+                (row["id"], scope, row["source"], now()),
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.blocked VALUES(?,?)",
+                (scope, row["source"]),
+            )
+        self.db.execute("DELETE FROM emotion_events WHERE scope=?", (scope,))
+        self.db.execute("DELETE FROM emotions WHERE scope=?", (scope,))
+        for row in self.db.execute(
+            "SELECT id,source FROM tasks WHERE scope=?", (scope,)
+        ).fetchall():
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.deleted VALUES(?,?,?,?)",
+                (row["id"], scope, row["source"], now()),
+            )
+            self.db.execute(
+                "INSERT OR IGNORE INTO ledger.blocked VALUES(?,?)",
+                (scope, row["source"]),
+            )
+        self.db.execute(
+            "UPDATE tasks SET state=CASE WHEN state IN ('pending','running') THEN 'cancelled' ELSE state END,content='' WHERE scope=?",
+            (scope,),
+        )
+        self.db.execute(
+            "UPDATE executions SET state='cancelled',reason='memory_changed' WHERE scope=? AND state IN ('pending','running')",
+            (scope,),
+        )
+        self.db.execute(
+            "UPDATE outbox SET content='',state=CASE WHEN state='queued' THEN 'cancelled' ELSE state END,reason='memory_changed' WHERE scope=?",
+            (scope,),
+        )
 
     def record_event(self, ticket: Ticket, kind: str, content: str) -> str:
         if kind not in ("user_reported", "shared_plan"):

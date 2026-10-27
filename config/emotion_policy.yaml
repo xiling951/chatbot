@@ -1,0 +1,7 @@
+enabled: true
+half_life_hours: 6
+baseline_valence: 0.0
+baseline_arousal: 0.3
+baseline_social_energy: 0.7
+meaning: simulated_interaction_style_not_real_feelings
+no_response: no_penalty_or_attachment_score

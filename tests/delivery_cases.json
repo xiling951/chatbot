@@ -1,0 +1,105 @@
+{
+  "evidence_kind": "local SQLite, simulated time and fake transport; no real phone acceptance",
+  "cases": [
+    {
+      "id": "P4-01",
+      "check": "未授权不生成",
+      "test": "test_delivery.DeliveryTests.test_unauthorized_subject_cannot_create_or_borrow_target"
+    },
+    {
+      "id": "P4-02",
+      "check": "重复唤醒只生成一次",
+      "test": "test_delivery.DeliveryTests.test_duplicate_wakeup_has_one_execution_and_one_candidate"
+    },
+    {
+      "id": "P4-03",
+      "check": "20事件来源/授权/决策/结果",
+      "test": "test_delivery.DeliveryTests.test_twenty_events_have_source_reason_authorization_and_result"
+    },
+    {
+      "id": "P4-04",
+      "check": "免打扰和未验证渠道不预占",
+      "test": "test_delivery.DeliveryTests.test_quiet_hours_and_unverified_capability_do_not_reserve_quota"
+    },
+    {
+      "id": "P4-05",
+      "check": "当地日额度原子预占",
+      "test": "test_delivery.DeliveryTests.test_daily_quota_is_atomic_and_delivery_observation_stays_unknown"
+    },
+    {
+      "id": "P4-06",
+      "check": "未回应降频",
+      "test": "test_delivery.DeliveryTests.test_no_response_reduces_frequency_without_resetting_quota"
+    },
+    {
+      "id": "P4-07",
+      "check": "当地午夜独立于UTC日",
+      "test": "test_delivery.DeliveryTests.test_local_midnight_resets_day_even_within_one_utc_day"
+    },
+    {
+      "id": "P4-08",
+      "check": "任务与候选过期",
+      "test": "test_delivery.DeliveryTests.test_candidate_and_missed_task_expiry_do_not_submit"
+    },
+    {
+      "id": "P4-09",
+      "check": "执行中撤销丢弃晚到结果",
+      "test": "test_delivery.DeliveryTests.test_revoke_during_generation_discards_late_result"
+    },
+    {
+      "id": "P4-10",
+      "check": "排队后撤销",
+      "test": "test_delivery.DeliveryTests.test_revoke_after_queue_blocks_submission_and_future_tasks"
+    },
+    {
+      "id": "P4-11",
+      "check": "在途接受不可伪称撤回",
+      "test": "test_delivery.DeliveryTests.test_revoke_in_flight_cannot_erase_platform_acceptance"
+    },
+    {
+      "id": "P4-12",
+      "check": "unknown保留额度且不重试",
+      "test": "test_delivery.DeliveryTests.test_unknown_keeps_quota_and_never_blindly_retries"
+    },
+    {
+      "id": "P4-13",
+      "check": "确定未接受才有限退避",
+      "test": "test_delivery.DeliveryTests.test_proven_rejection_releases_quota_with_bounded_backoff"
+    },
+    {
+      "id": "P4-14",
+      "check": "重启后sending租约转unknown",
+      "test": "test_delivery.DeliveryTests.test_restart_recovers_expired_submission_as_unknown"
+    },
+    {
+      "id": "P4-15",
+      "check": "生成租约到期",
+      "test": "test_delivery.DeliveryTests.test_generation_lease_expiry_prevents_late_result"
+    },
+    {
+      "id": "P4-16",
+      "check": "跨周期停机合并",
+      "test": "test_delivery.DeliveryTests.test_interval_downtime_coalesces_to_one_recent_candidate"
+    },
+    {
+      "id": "P4-17",
+      "check": "删除后旧备份不复活候选",
+      "test": "test_delivery.DeliveryTests.test_memory_delete_cancels_candidates_and_old_backup_cannot_revive_them"
+    },
+    {
+      "id": "P4-18",
+      "check": "旧快照不重发已接受消息",
+      "test": "test_delivery.DeliveryTests.test_old_snapshot_cannot_resend_an_accepted_submission"
+    },
+    {
+      "id": "P4-19",
+      "check": "旧快照不恢复撤销授权",
+      "test": "test_delivery.DeliveryTests.test_old_snapshot_cannot_restore_revoked_authorization"
+    },
+    {
+      "id": "P4-20",
+      "check": "两个连接不重复提交",
+      "test": "test_delivery.DeliveryTests.test_independent_connections_cannot_both_claim_one_send"
+    }
+  ]
+}

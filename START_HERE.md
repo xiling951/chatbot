@@ -22,7 +22,9 @@ P0–P6 的编号已保留；P2 包含最小插件闭环，P3 不依赖跨平台
 
 已部署 AstrBot v4.29.3 与 Companion Core v0.3.2，代码/环境在 F:/chatbot-runtime/AstrBot，私有 ASTRBOT_ROOT 在 C:/Users/Lenovo/AppData/Local/CompanionCore/runtime（F 盘 exFAT 不支持 ACL）。75 项本地检查通过；新增可选自动记忆、冲突确认、关系与共同事件。真实 Web 自动记忆 20/20，关联生命周期问答 7/7；手机新版媒体和中文入口仍待人工验收。当前版本已建立 GitHub 基线回退标签，见 docs/backup_restore.md。勿重复部署或重置调用授权。
 
-已授权复用桌面版 DSH 当前凭据（AppData/Roaming/dsh-desktop/harness；默认 ~/.dsh 为旧无效密钥）。用户已明确 DeepSeek 测试调用不限次数，所说额度上限指 Codex；旧次数、5 元预留和日期闸门不再适用，不能以其耗尽停止。v0.2.1 不限次数模式已部署，真实 Web 验证普通聊天恢复。用户休息，手机/扫码/本人测试暂挂；微信仅本人单聊获授权，原生语音气泡仍未满足。
+已授权复用桌面版 DSH 当前凭据（AppData/Roaming/dsh-desktop/harness；默认 ~/.dsh 为旧无效密钥）。用户已明确 DeepSeek 测试调用不限次数，所说额度上限指 Codex；旧次数、5 元预留和日期闸门不再适用，不能以其耗尽停止。v0.2.1 不限次数模式已部署，真实 Web 验证普通聊天恢复。用户已返回，正在配合新版微信记忆验收；微信仅本人单聊获授权，原生语音气泡仍未满足。
+
+v0.4.0 主动队列与模拟风格源码正在本地验证，尚未部署；当前手机测试期间保持在线 v0.3.2，不把源码版本当成运行版本。提醒时区已由用户指定为 Asia/Shanghai。
 
 ## 第一批应实际推进的工作
 

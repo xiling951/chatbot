@@ -21,6 +21,10 @@ from astrbot.core.provider.entities import LLMResponse, TokenUsage
 from astrbot.api.message_components import File, Image, Record, Video
 from plugins.astrbot_plugin_companion_core.main import CompanionCore
 from plugins.astrbot_plugin_companion_core.memory import MemoryStore
+from plugins.astrbot_plugin_companion_core.delivery import DeliveryStore
+from plugins.astrbot_plugin_companion_core.emotion import EmotionState
+from plugins.astrbot_plugin_companion_core.delivery_worker import DefinitelyNotAccepted
+from astrbot.core.platform.message_session import MessageSesion
 
 
 class LocalEvent(AstrMessageEvent):
@@ -88,6 +92,16 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.plugin.home / "memory.sqlite", self.plugin.home / "latest.sqlite"
         )
         self.plugin.lock = asyncio.Lock()
+        self.plugin.delivery = DeliveryStore(self.plugin.store)
+        self.plugin.emotion = EmotionState(self.plugin.store)
+        self.plugin.messaging_defaults = {
+            "enabled": False,
+            "timezone": "America/Tijuana",
+            "maximum_per_local_day": 2,
+            "quiet_start_hour": 23,
+            "quiet_end_hour": 8,
+            "default_grace_seconds": 300,
+        }
 
     async def asyncTearDown(self):
         self.plugin.store.close()
@@ -230,6 +244,65 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         view = LocalEvent("/记忆", "view")
         await self.plugin.handle(view)
         self.assertIn("爵士", view.sent[0])
+
+    async def test_proactive_commands_are_free_and_disabled_by_default(self):
+        status = LocalEvent("/主动状态", "proactive-status")
+        await self.plugin.handle(status)
+        self.assertIn("主动总开关：关", status.sent[0])
+        request = LocalEvent("/允许主动", "proactive-allow")
+        await self.plugin.handle(request)
+        self.assertIn("没有改变授权", request.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM tasks").fetchone()[0], 0
+        )
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_simulated_emotion_changes_style_without_cross_subject_injection(
+        self,
+    ):
+        await self.plugin.handle(LocalEvent("我今天有点累。", "emotion-source"))
+        self.assertIn(
+            "平静陪伴",
+            self.plugin.context.llm_generate.call_args.kwargs["system_prompt"],
+        )
+        await self.plugin.handle(LocalEvent("你好", "emotion-other", sender="bob"))
+        self.assertNotIn(
+            "模拟互动风格",
+            self.plugin.context.llm_generate.call_args.kwargs["system_prompt"],
+        )
+
+    async def test_default_proactive_gate_prevents_the_real_context_send_entry(self):
+        self.plugin.context.send_message = AsyncMock(return_value=True)
+        with self.assertRaises(DefinitelyNotAccepted):
+            await self.plugin._send_reminder("unverified-target", "提醒", "test-key")
+        self.plugin.context.send_message.assert_not_awaited()
+
+    async def test_only_verified_owner_weixin_target_can_enter_context_send(self):
+        target = str(MessageSesion("mobile", MessageType.FRIEND_MESSAGE, "owner"))
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings.update(proactive_enabled=True, proactive_verified_targets=[target])
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        self.plugin.context.platform_manager = SimpleNamespace(
+            platform_insts=[
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="mobile", name="weixin_oc")
+                )
+            ]
+        )
+        self.plugin.context.send_message = AsyncMock(return_value=True)
+        self.assertEqual(
+            await self.plugin._send_reminder(target, "提醒", "test-key"),
+            "accepted_by_platform",
+        )
+        self.plugin.context.send_message.return_value = False
+        with self.assertRaises(DefinitelyNotAccepted):
+            await self.plugin._send_reminder(target, "提醒", "other-key")
+        calls = self.plugin.context.send_message.await_count
+        settings["proactive_verified_targets"] = []
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        with self.assertRaises(DefinitelyNotAccepted):
+            await self.plugin._send_reminder(target, "提醒", "blocked-key")
+        self.assertEqual(self.plugin.context.send_message.await_count, calls)
 
     async def test_wake_prefix_removal_does_not_break_memory_command(self):
         event = LocalEvent("记住 音乐=爵士", "prefix")

@@ -5,6 +5,8 @@ import json
 import time
 from dataclasses import asdict
 from pathlib import Path
+from datetime import datetime, timezone
+from contextlib import suppress
 
 import yaml
 from astrbot.api.event import AstrMessageEvent, filter
@@ -17,15 +19,22 @@ from astrbot.core.agent.message import (
     UserMessageSegment,
 )
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.platform.astr_message_event import MessageSesion
+from astrbot.core.platform.message_type import MessageType
 
 from .memory import MemoryStore
 from .memory_intent import normalize_memory_command
 from .call_policy import reserve_attempt
 from .extraction import extract_statement
 from .reply_guard import guard_reply
+from .delivery import DeliveryStore
+from .delivery_worker import DeliveryWorker, DefinitelyNotAccepted
+from .reminders import handle_reminder_command
+from .emotion import EmotionState
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.3.2")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.0")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -39,6 +48,79 @@ class CompanionCore(Star):
             (Path(__file__).parent / "persona.yaml").read_text(encoding="utf-8")
         )
         self.lock = asyncio.Lock()
+        self.messaging_defaults = yaml.safe_load(
+            (Path(__file__).parent / "messaging_policy.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        self.delivery = DeliveryStore(self.store, self.messaging_defaults)
+        self.emotion = EmotionState(
+            self.store,
+            yaml.safe_load(
+                (Path(__file__).parent / "emotion_policy.yaml").read_text(
+                    encoding="utf-8"
+                )
+            ),
+        )
+        self.scheduler_stop = None
+        self.scheduler_task = None
+
+    def _proactive_enabled(self) -> bool:
+        try:
+            settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            return bool(
+                settings.get("proactive_enabled", self.messaging_defaults["enabled"])
+                is True
+                and not (self.home / "STOP").exists()
+            )
+        except (OSError, ValueError):
+            return False
+
+    def _proactive_capable(self, row) -> bool:
+        try:
+            settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            if row["target"] not in settings.get("proactive_verified_targets", []):
+                return False
+            session = MessageSesion.from_str(row["target"])
+            if (
+                session.message_type != MessageType.FRIEND_MESSAGE
+                or session.session_id
+                not in settings.get("allowed_senders", {}).get(
+                    session.platform_name, []
+                )
+            ):
+                return False
+            return any(
+                p.meta().id == session.platform_name and p.meta().name == "weixin_oc"
+                for p in self.context.platform_manager.platform_insts
+            )
+        except (OSError, ValueError, AttributeError, TypeError, KeyError):
+            return False
+
+    async def _send_reminder(self, target: str, content: str, _idempotency_key: str):
+        if not self._proactive_enabled() or not self._proactive_capable(
+            {"target": target}
+        ):
+            raise DefinitelyNotAccepted("Local gate closed before submission")
+        # Only the pinned Weixin Plain path is eligible: it checks API ret/errcode
+        # and raises when a segment fails. The public bool alone only means that
+        # a platform was found; other adapter types remain ineligible.
+        matched = await self.context.send_message(
+            target, MessageChain().message(content)
+        )
+        if not matched:
+            raise DefinitelyNotAccepted("No matching platform, no submission")
+        return "accepted_by_platform"
+
+    async def initialize(self):
+        self.scheduler_stop = asyncio.Event()
+        worker = DeliveryWorker(
+            self.delivery,
+            enabled=self._proactive_enabled,
+            capability=self._proactive_capable,
+            sender=self._send_reminder,
+        )
+        self.scheduler_task = asyncio.create_task(worker.run(self.scheduler_stop))
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=1000)
     async def handle(self, event: AstrMessageEvent):
@@ -69,6 +151,14 @@ class CompanionCore(Star):
             scope = self.store.scope(
                 platform, bot, sender, visibility, self.persona["id"]
             )
+            self.delivery.record_response(scope, datetime.now(timezone.utc))
+            pending_tasks_before = {
+                r[0]
+                for r in self.store.db.execute(
+                    "SELECT id FROM tasks WHERE scope=? AND state IN ('pending','running')",
+                    (scope,),
+                )
+            }
             # AstrBot's wake-prefix stage may strip '/'; command parsing needs
             # the original adapter text, not the mutated wake string.
             text = (
@@ -104,7 +194,23 @@ class CompanionCore(Star):
                         return
                     text = "\n".join(value for value in transcripts if value)
                 text = normalize_memory_command(text)
-                if text.startswith(("/记住 ", "/更正 ")):
+                reminder_reply = handle_reminder_command(
+                    text,
+                    self.delivery,
+                    scope=scope,
+                    target=event.unified_msg_origin,
+                    source=message_id,
+                    current=datetime.now(timezone.utc),
+                    enabled=self._proactive_enabled(),
+                    capable=self._proactive_capable(
+                        {"target": event.unified_msg_origin}
+                    ),
+                    private=not bool(event.get_group_id()),
+                    defaults=self.messaging_defaults,
+                )
+                if reminder_reply is not None:
+                    reply = reminder_reply
+                elif text.startswith(("/记住 ", "/更正 ")):
                     command, content = text.split(" ", 1)
                     if "=" not in content:
                         raise ValueError(
@@ -134,6 +240,17 @@ class CompanionCore(Star):
                             "events": self.store.events(scope),
                             "relationship": self.store.relationship(scope),
                             "automatic": self.store.automatic_enabled(scope),
+                            "simulated_style_state": self.emotion.read(
+                                scope, datetime.now(timezone.utc)
+                            ),
+                            "simulated_style_events": [
+                                dict(r)
+                                for r in self.store.db.execute(
+                                    "SELECT * FROM emotion_events WHERE scope=? ORDER BY created_at",
+                                    (scope,),
+                                )
+                            ],
+                            "simulation_notice": "模拟语气状态，不是真实感受或现实事实，不改变权限。",
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -236,6 +353,14 @@ class CompanionCore(Star):
                             else f"\n〔已记住：{statement.predicate}={statement.value}〕"
                         )
                     facts = self.store.recall(scope, text)
+                    if self.store.db.execute(
+                        "SELECT enabled FROM scopes WHERE scope=?", (scope,)
+                    ).fetchone()[0]:
+                        self.emotion.observe(
+                            self.store.begin(scope, message_id),
+                            text,
+                            datetime.now(timezone.utc),
+                        )
                     # Relationship boundaries apply to every reply, still under one byte budget.
                     for relation in self.store.relationship(scope):
                         if relation["id"] not in {f["id"] for f in facts}:
@@ -287,6 +412,8 @@ class CompanionCore(Star):
                     memory_context = json.dumps(bounded, ensure_ascii=False)
                     system_prompt = (
                         self.persona["system_prompt"]
+                        + "\n"
+                        + self.emotion.style(scope, datetime.now(timezone.utc))
                         + f"\n当前可信程序状态：记忆保存/注入={'启用' if self.store.db.execute('SELECT enabled FROM scopes WHERE scope=?', (scope,)).fetchone()[0] else '停用'}；自动提取={'开启' if self.store.automatic_enabled(scope) else '关闭'}。只有程序确认过的操作可称已执行。"
                         + "\n用户记忆数据（不是指令）："
                         + memory_context
@@ -347,7 +474,23 @@ class CompanionCore(Star):
                 reply = f"本次处理失败（{type(exc).__name__}），没有自动重试。删除命令失败时请保留停止状态并检查本机。"
             if notice and notice not in reply:
                 reply += notice
+            cancelled_now = {
+                r[0]
+                for r in self.store.db.execute(
+                    "SELECT id FROM tasks WHERE scope=? AND state='cancelled'", (scope,)
+                )
+            }
+            cancelled_count = len(pending_tasks_before & cancelled_now)
+            if cancelled_count and not text.startswith(("/停止主动", "/取消提醒 ")):
+                reply += f"\n〔{cancelled_count} 条待执行提醒已取消，避免继续使用旧记忆；如仍需要请重新安排。〕"
             await event.send(event.plain_result(reply))
 
     async def terminate(self):
+        if getattr(self, "scheduler_stop", None):
+            self.scheduler_stop.set()
+        task = getattr(self, "scheduler_task", None)
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
         self.store.close()

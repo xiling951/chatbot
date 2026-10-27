@@ -102,6 +102,12 @@ def main():
         ignore=shutil.ignore_patterns("__pycache__"),
     )
     shutil.copy2(PROJECT / "config" / "persona.yaml", plugin / "persona.yaml")
+    shutil.copy2(
+        PROJECT / "config" / "messaging_policy.yaml", plugin / "messaging_policy.yaml"
+    )
+    shutil.copy2(
+        PROJECT / "config" / "emotion_policy.yaml", plugin / "emotion_policy.yaml"
+    )
     home = data / "plugin_data" / "companion_core"
     home.mkdir(parents=True, exist_ok=True)
     settings = home / "settings.local.json"

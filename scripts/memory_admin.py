@@ -2,6 +2,8 @@
 
 import argparse
 import sys
+import sqlite3
+from contextlib import closing
 from pathlib import Path
 from local_paths import PLUGIN_DATA
 
@@ -18,14 +20,22 @@ restore.add_argument("snapshot", type=Path)
 restore.add_argument("destination", type=Path)
 args = parser.parse_args()
 if args.action == "backup":
-    store = MemoryStore(home / "memory.sqlite", home / "deletions.sqlite")
-    try:
-        store.backup(args.destination)
+    if args.destination.exists() or not (home / "deletions.sqlite").exists():
+        raise SystemExit("Backup requires a fresh destination and the current ledger")
+    # Never initialize the development MemoryStore just to back up a live older
+    # plugin: doing so would migrate its DB before the running code is upgraded.
+    with (
+        closing(
+            sqlite3.connect(
+                f"file:{(home / 'memory.sqlite').as_posix()}?mode=ro", uri=True
+            )
+        ) as source,
+        closing(sqlite3.connect(args.destination)) as target,
+    ):
+        source.backup(target)
         print(
             "Consistent memory backup created. Keep the authoritative deletion ledger separately current."
         )
-    finally:
-        store.close()
 else:
     if args.destination.resolve() in (
         (home / "memory.sqlite").resolve(),
@@ -43,9 +53,12 @@ else:
             store.db.execute(
                 f"SELECT count(*) FROM {table} WHERE id IN (SELECT id FROM ledger.deleted)"
             ).fetchone()[0]
-            for table in ("facts", "events", "candidates")
+            for table in ("facts", "events", "candidates", "emotion_events")
         )
-        if integrity != "ok" or remaining_deleted:
+        unsafe_queue = store.db.execute(
+            "SELECT count(*) FROM outbox o WHERE state='queued' AND (memory_revision != COALESCE((SELECT revision FROM ledger.revisions r WHERE r.scope=o.scope),0) OR auth_revision != COALESCE((SELECT revision FROM ledger.proactive a WHERE a.scope=o.scope),-1) OR idempotency_key IN (SELECT idempotency_key FROM ledger.submissions WHERE state IN ('sending','accepted_by_platform','unknown')))"
+        ).fetchone()[0]
+        if integrity != "ok" or remaining_deleted or unsafe_queue:
             raise SystemExit("Quarantine validation failed; do not activate")
         print(
             "Quarantine restore integrity and deletion replay passed. Not activated for chat."
