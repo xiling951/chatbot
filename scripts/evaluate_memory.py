@@ -26,7 +26,15 @@ def main():
     )
     parser.add_argument(
         "--suite",
-        choices=["memory", "natural", "persona", "retrieval", "privacy", "automatic"],
+        choices=[
+            "memory",
+            "natural",
+            "persona",
+            "retrieval",
+            "privacy",
+            "automatic",
+            "safeguards",
+        ],
         default="memory",
     )
     parser.add_argument("--m01-indices", default=",".join(str(i) for i in range(1, 21)))
@@ -167,6 +175,50 @@ def main():
             )
 
         try:
+            if args.suite == "safeguards":
+                for command, expected in [
+                    ("/主动状态", "主动总开关：关"),
+                    ("/允许主动", "没有安排提醒"),
+                    ("/提醒 2099-01-01 12:00 测试", "没有安排提醒"),
+                    ("/提醒列表", "没有提醒"),
+                    ("/停止主动", "已阻止后续主动发送"),
+                ]:
+                    reply = send(command)
+                    if expected not in reply:
+                        raise RuntimeError("Proactive safeguard failed: " + command)
+                reply = send("我今天有点累。")
+                state = json.loads(send("/导出记忆"))
+                if (
+                    not state.get("simulated_style_state")
+                    or state["simulated_style_state"]["valence"] >= 0
+                    or not any(
+                        e["reason"] == "supportive"
+                        for e in state["simulated_style_events"]
+                    )
+                ):
+                    raise RuntimeError(
+                        "Real Web event did not persist scoped style state"
+                    )
+                report["style_observation"] = {
+                    "prompt": "我今天有点累。",
+                    "reply": reply,
+                    "state": state["simulated_style_state"],
+                    "facts_added": len(state["facts"]),
+                }
+                if (
+                    json.loads(send("/导出记忆", user=other)).get(
+                        "simulated_style_state"
+                    )
+                    is not None
+                ):
+                    raise RuntimeError("Style state crossed subject boundary")
+                send("/忘记 全部")
+                if (
+                    json.loads(send("/导出记忆")).get("simulated_style_state")
+                    is not None
+                ):
+                    raise RuntimeError("Style state survived active memory deletion")
+                report["proactive_disabled_and_style_checks_passed"] = True
             if args.suite == "automatic":
                 send("/自动记忆 开")
                 for case in cases:

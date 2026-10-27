@@ -21,6 +21,9 @@ config["platform"] = [
 settings_path = home / "settings.local.json"
 settings = json.loads(settings_path.read_text(encoding="utf-8"))
 settings.setdefault("allowed_senders", {})[platform["id"]] = [owner]
+settings.setdefault("bot_account_ids", {})[platform["id"]] = platform[
+    "weixin_oc_account_id"
+]
 # Set the allowlist before writing the adapter config, to fail closed on restart.
 settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 config_path.write_text(

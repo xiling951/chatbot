@@ -34,7 +34,7 @@ from .reminders import handle_reminder_command
 from .emotion import EmotionState
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.0")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.1")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -68,6 +68,13 @@ class CompanionCore(Star):
     def _proactive_enabled(self) -> bool:
         try:
             settings = json.loads(self.settings_path.read_text(encoding="utf-8"))
+            deadline = settings.get("proactive_test_until")
+            if deadline:
+                expires = datetime.fromisoformat(deadline)
+                if expires.tzinfo is None or datetime.now(
+                    timezone.utc
+                ) >= expires.astimezone(timezone.utc):
+                    return False
             return bool(
                 settings.get("proactive_enabled", self.messaging_defaults["enabled"])
                 is True
@@ -141,7 +148,17 @@ class CompanionCore(Star):
         # Serialize reply generation and deletion so a late reply cannot use forgotten data.
         async with self.lock:
             sender = event.get_sender_id()
-            bot = f"{platform}:{event.get_self_id()}"
+            bot_account = event.get_self_id()
+            if event.get_platform_name() == "weixin_oc":
+                bot_account = settings.get("bot_account_ids", {}).get(platform)
+                if not bot_account:
+                    await event.send(
+                        event.plain_result(
+                            "微信机器人账号尚未在本机核实，已暂停处理；请先由本机恢复已确认的绑定配置。"
+                        )
+                    )
+                    return
+            bot = f"{platform}:{bot_account}"
             message_id = str(event.message_obj.message_id or "")
             if not self.store.claim(platform, bot, event.get_session_id(), message_id):
                 return

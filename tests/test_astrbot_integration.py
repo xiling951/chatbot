@@ -277,6 +277,14 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             await self.plugin._send_reminder("unverified-target", "提醒", "test-key")
         self.plugin.context.send_message.assert_not_awaited()
 
+    async def test_expired_test_window_closes_proactive_gate(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings.update(
+            proactive_enabled=True, proactive_test_until="2020-01-01T00:00:00+00:00"
+        )
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        self.assertFalse(self.plugin._proactive_enabled())
+
     async def test_only_verified_owner_weixin_target_can_enter_context_send(self):
         target = str(MessageSesion("mobile", MessageType.FRIEND_MESSAGE, "owner"))
         settings = json.loads(self.plugin.settings_path.read_text())
@@ -401,6 +409,9 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_weixin_cloud_transcript_uses_real_event_owner(self):
         settings = json.loads(self.plugin.settings_path.read_text())
         settings["allowed_senders"]["weixin_oc"] = ["owner"]
+        settings.setdefault("bot_account_ids", {})["weixin_oc"] = (
+            "trusted-weixin-account"
+        )
         self.plugin.settings_path.write_text(json.dumps(settings))
         event = LocalEvent("", "voice-transcript", sender="owner", platform="weixin_oc")
         event.message_obj.message = [Record(file="not-read.silk")]
@@ -410,6 +421,27 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.handle(event)
         self.assertEqual(event.sent, ["已保存这条明确记忆。"])
         self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_actual_weixin_account_separates_bots_even_with_same_adapter_id(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["weixin_oc"] = ["owner"]
+        settings["bot_account_ids"] = {"weixin_oc": "account-a"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        await self.plugin.handle(
+            LocalEvent("/记住 音乐=爵士", "bot-a", sender="owner", platform="weixin_oc")
+        )
+        settings["bot_account_ids"]["weixin_oc"] = "account-b"
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        other = LocalEvent("/记忆", "bot-b", sender="owner", platform="weixin_oc")
+        await self.plugin.handle(other)
+        self.assertEqual(other.sent, ["当前没有记忆。"])
+        settings["bot_account_ids"]["weixin_oc"] = "account-a"
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        first = LocalEvent(
+            "/记忆", "bot-a-return", sender="owner", platform="weixin_oc"
+        )
+        await self.plugin.handle(first)
+        self.assertIn("爵士", first.sent[0])
 
     async def test_ambiguous_forget_does_not_claim_erasure_or_touch_facts(self):
         await self.plugin.handle(LocalEvent("记住，我喜欢爵士", "privacy-fact"))

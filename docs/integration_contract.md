@@ -6,6 +6,7 @@
 - 框架唤醒阶段会移除 `/`；命令读取 `event.message_obj.message_str` 的原始适配器文本，缺失时回退 event.get_message_str。已有回归。
 - 模型 ID 从本机配置选择，非消息正文；人格只有一个 system_prompt 注入点。记忆写入通过 MemoryStore.put、apply_statement 和 confirm，共享同一事务校验及事实写入函数，只接受本人明确陈述。memory_intent.py 识别显式指令；extraction.py 仅在主体单独开启自动记忆后提取当前可信消息，未启用时普通聊天不写事实。
 - 身份来自 get_platform_id、get_self_id、get_sender_id；机器人键同时包含适配器 ID，不能用昵称合并。私聊在同一用户跨 Web 会话共享事实，群聊按 group_id 隔离，persona 独立。手机号与完整 ID 不写普通日志。
+- v0.4.1 修正微信特例：固定版适配器把 self_id 设为适配器 ID，不能当成真实机器人账号。微信使用本机已扫码确认的 bot_account_ids 映射，缺失则拒绝处理；模型或正文不能指定。当前唯一绑定的历史键经离线备份后只更新 identities.bot，保留同一 person/scope 及删除账本，没有合并两个人；遇到双键冲突必须拒绝自动迁移。之后换机器人账号会得到隔离主体。真实修复 1 行，其他账号隔离为假事件/临时库测试。
 - 事件键由平台、机器人、会话、消息 ID 哈希组成，SQLite 唯一约束先占位。崩溃或发送状态不明时不重发：保证至多一次尝试，不能声称平台端恰好一次或必达。缺失稳定消息 ID 会拒绝处理。
 - 所有生成及删除串行，避免迟到回复继续使用删除前记忆。请求最多一次，不执行工具或后台模型任务。
 - 不读取 AstrBot 显示历史。插件自己的 turns 保存最多 3 轮/24 小时的短期上下文，每次注入上限 4000 UTF-8 字节，通过 UserMessageSegment / AssistantMessageSegment 传入 contexts。与长期事实分开；更正、删除、停用清空该用户可见范围的所有短期轮次，旧备份按 ledger revision 失效。

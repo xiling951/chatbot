@@ -37,3 +37,5 @@ powershell -File F:/chatbot/scripts/start.ps1
 v0.4.0 源码待部署，将使用 schema 4。当前在线 v0.3.2/schema 3，迁移前一致性快照为 backups/before-v0.4-activation.sqlite。新版 memory_admin.py 的 backup 分支直接只读使用 SQLite backup API，不实例化新开发版 MemoryStore，因此备份不会提前迁移仍运行的旧版；本次实际备份后复核在线 user_version 仍为 3。
 
 schema 4 恢复还会重放最新主动授权/投递账本；已接受/unknown 不重发，历史提交的额度和有限重试次数不回退。不能恢复旧账本来绕开撤销、次数或删除标记。停止脚本先置 STOP，并用不迁移数据库的停止助手持久化撤销，再终止已核对身份的进程；在途提交仍可能被平台接受。源码检查点 checkpoint-2026-10-26-v0.3.2 保留可回退版本，不能直接用它打开 schema 4；必须走相应的旧快照隔离恢复和兼容性检查。
+
+v0.4.1 仍为 schema 4，但修正微信机器人身份键。当前已确认绑定的适配器历史 fallback 键更新为真实账号键，person/scope 不变，故事实和删除账本不回滚；修复前快照 backups/before-v0.4.1.sqlite 已建立。降到 v0.4.0 时除了 schema 兼容，还必须核对身份键格式，不能宣称只替换代码就无损恢复；使用修复前快照加当前账本隔离验证。账号修复助手要求服务离线、当前绑定/白名单/配置一致和匹配备份，不按昵称合并，也不允许已存在两个身份时自动合并。
