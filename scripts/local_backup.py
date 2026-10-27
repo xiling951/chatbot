@@ -141,7 +141,7 @@ def collect(data=DATA, home=PLUGIN_DATA):
         home / "allowance.local.json",
         home / "weixin-bound.local.json",
     ]
-    optional = [data / "mcp_server.json"]
+    optional = [data / "mcp_server.json", home / "qq-bound.local.json"]
     for path in required + optional:
         if not path.is_file():
             if path in required:
@@ -160,7 +160,7 @@ def collect(data=DATA, home=PLUGIN_DATA):
         if (
             path.is_file()
             and not path.is_symlink()
-            and path.suffix in {".py", ".sql", ".yaml"}
+            and path.suffix in {".py", ".sql", ".yaml", ".txt"}
         ):
             files[path.relative_to(data).as_posix()] = path.read_bytes()
     framework = data / "data_v4.db"

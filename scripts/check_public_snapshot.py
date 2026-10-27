@@ -25,6 +25,8 @@ def main():
                     "password",
                     "pbkdf2_password",
                     "jwt_secret",
+                    "secret",
+                    "bind_key",
                     "weixin_oc_token",
                     "weixin_oc_user_id",
                     "weixin_oc_account_id",
@@ -41,6 +43,8 @@ def main():
         DATA / "cmd_config.json",
         DATA / "admin.local.json",
         DATA / "plugin_data/companion_core/weixin-bound.local.json",
+        DATA / "plugin_data/companion_core/qq-bound.local.json",
+        DATA / "plugin_data/companion_core/qq-login-state.local.json",
     ]:
         if path.exists():
             collect(json.loads(path.read_text(encoding="utf-8-sig")))

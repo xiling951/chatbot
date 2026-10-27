@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import time
 from ctypes import wintypes
@@ -16,6 +17,9 @@ import httpx
 from filelock import FileLock, Timeout
 from local_paths import PROJECT_ROOT, DATA, PLUGIN_DATA
 from local_backup import maybe_backup
+
+sys.path.insert(0, str(PROJECT_ROOT))
+from plugins.astrbot_plugin_companion_core.cloud_tts import prune_cache
 
 
 def read_json(path: Path):
@@ -316,6 +320,12 @@ def main():
             output = folder / f"availability-{now.date().isoformat()}.local.jsonl"
             # Purely local encrypted snapshot, due every 24h. No paid/API/IM work.
             result["local_backup"] = maybe_backup(now)
+            try:
+                result["expired_tts_cache_removed"] = prune_cache(
+                    PLUGIN_DATA / "tts-cache", now
+                )
+            except OSError as exc:
+                result["tts_cache_cleanup_error"] = type(exc).__name__
             with output.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(result, ensure_ascii=False) + "\n")
             save_state(state, policy.state)

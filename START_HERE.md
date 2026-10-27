@@ -20,7 +20,7 @@ P0–P6 的编号已保留；P2 包含最小插件闭环，P3 不依赖跨平台
 
 ## 当前已完成与未完成
 
-已部署 AstrBot v4.29.3 与 Companion Core v0.4.2/schema 4，代码/环境在 F:/chatbot-runtime/AstrBot，实际私有 ASTRBOT_ROOT 读取忽略的 config/runtime_root.local.json（F 盘 exFAT 不支持 ACL，原 C 盘逻辑 AppData 受重定向影响）。161 项本地检查通过；真实 Web 自动记忆 20/20、关联生命周期 7/7、完整记忆 25/25。手机自动记忆/冲突/删除、语音输入和三类媒体降级已确认；原生语音单次回放探针已上线待手机反馈，不能称硬要求已满足。GitHub 检查点 checkpoint-2026-10-27-v0.4.2 已核对远端，见 docs/backup_restore.md。勿重复部署或重置调用授权。
+已部署 AstrBot v4.29.3 与 Companion Core v0.4.3/schema 4，代码/环境在 F:/chatbot-runtime/AstrBot，实际私有 ASTRBOT_ROOT 读取忽略的 config/runtime_root.local.json（F 盘 exFAT 不支持 ACL，原 C 盘逻辑 AppData 受重定向影响）。最近整体175项本地检查及新增无空格命令回归通过；真实 Web 自动记忆20/20、关联7/7、完整记忆25/25。手机自动记忆/冲突/删除、语音输入和三类媒体降级已确认。原生 VOICE 回放接口接受但手机未显示，判失败且已关闭同路径；原生要求仍未满足。云 TTS 10段生成/解码10/10，手机文件播放另待验。GitHub 检查点见 docs/backup_restore.md，勿重置绑定或调用授权。
 
 已授权复用桌面版 DSH 当前凭据（AppData/Roaming/dsh-desktop/harness；默认 ~/.dsh 为旧无效密钥）。用户已明确 DeepSeek 测试调用不限次数，所说额度上限指 Codex；旧次数、5 元预留和日期闸门不再适用，不能以其耗尽停止。v0.2.1 不限次数模式已部署，真实 Web 验证普通聊天恢复。用户已返回，正在配合新版微信记忆验收；微信仅本人单聊获授权，原生语音气泡仍未满足。
 

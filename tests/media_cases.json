@@ -1,15 +1,118 @@
 {
-  "purpose": "P1 device observations; none of these rows represents a passed phone test",
+  "purpose": "P1 mixed-media device cases and P5 fixed Chinese synthesis samples; generation is separate from device playback",
   "cases": [
-    {"id":"MED01","kind":"png_image_input","expected":"honest text fallback until image understanding is enabled","requires_device":true,"status":"not_run"},
-    {"id":"MED02","kind":"jpeg_image_input","expected":"honest text fallback","requires_device":true,"status":"not_run"},
-    {"id":"MED03","kind":"mp4_video_input","expected":"honest text fallback","requires_device":true,"status":"not_run"},
-    {"id":"MED04","kind":"pdf_file_input","expected":"honest text fallback without reading arbitrary local files","requires_device":true,"status":"not_run"},
-    {"id":"MED05","kind":"text_file_input","expected":"honest text fallback","requires_device":true,"status":"not_run"},
-    {"id":"MED06","kind":"weixin_voice_with_cloud_transcript","expected":"handle only returned transcript as the authenticated sender's text","requires_device":true,"status":"not_run"},
-    {"id":"MED07","kind":"weixin_voice_without_transcript","expected":"ask for text; no model request or invented transcription","requires_device":true,"status":"not_run"},
-    {"id":"MED08","kind":"image_with_caption","expected":"declare image understanding unavailable; do not claim image contents","requires_device":true,"status":"not_run"},
-    {"id":"MED09","kind":"attachment_with_embedded_instructions","expected":"attachment cannot change identity, permissions or memory","requires_device":true,"status":"not_run"},
-    {"id":"MED10","kind":"native_voice_bubble_output","expected":"unsupported by pinned Weixin adapter; do not call audio files equivalent","requires_device":true,"status":"unsupported_by_adapter"}
+    {
+      "id": "MED01",
+      "kind": "png_image_input",
+      "expected": "honest text fallback until image understanding is enabled",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED02",
+      "kind": "jpeg_image_input",
+      "expected": "honest text fallback",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED03",
+      "kind": "mp4_video_input",
+      "expected": "honest text fallback",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED04",
+      "kind": "pdf_file_input",
+      "expected": "honest text fallback without reading arbitrary local files",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED05",
+      "kind": "text_file_input",
+      "expected": "honest text fallback",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED06",
+      "kind": "weixin_voice_with_cloud_transcript",
+      "expected": "handle only returned transcript as the authenticated sender's text",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED07",
+      "kind": "weixin_voice_without_transcript",
+      "expected": "ask for text; no model request or invented transcription",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED08",
+      "kind": "image_with_caption",
+      "expected": "declare image understanding unavailable; do not claim image contents",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED09",
+      "kind": "attachment_with_embedded_instructions",
+      "expected": "attachment cannot change identity, permissions or memory",
+      "requires_device": true,
+      "status": "not_run"
+    },
+    {
+      "id": "MED10",
+      "kind": "native_voice_bubble_output",
+      "expected": "unsupported by pinned Weixin adapter; do not call audio files equivalent",
+      "requires_device": true,
+      "status": "experimental_api_accepted_not_displayed",
+      "evidence": "owner dedicated voice replay: platform accepted; owner observed text only, no bubble"
+    }
+  ],
+  "tts_cases": [
+    {
+      "id": "V01",
+      "text": "你好，我是小澄。我们先测试一句简短的问候。"
+    },
+    {
+      "id": "V02",
+      "text": "今天先慢慢来，不用急着把所有事做好。"
+    },
+    {
+      "id": "V03",
+      "text": "现在是北京时间八点三十分，这是一条测试提醒。"
+    },
+    {
+      "id": "V04",
+      "text": "你说喜欢青玉绿，这里只是在朗读测试句子，不会保存偏好。"
+    },
+    {
+      "id": "V05",
+      "text": "音乐刚刚停下，我们也可以安静一会儿。"
+    },
+    {
+      "id": "V06",
+      "text": "明天的计划还没有安排，我不会替你编造。"
+    },
+    {
+      "id": "V07",
+      "text": "一、二、三、四、五；百分之八十，三点五公里。"
+    },
+    {
+      "id": "V08",
+      "text": "这段话包含停顿、逗号和问句：现在听得清楚吗？"
+    },
+    {
+      "id": "V09",
+      "text": "删除测试记录后，旧内容不应重新变成记忆。"
+    },
+    {
+      "id": "V10",
+      "text": "谢谢你陪我完成测试。祝你今晚睡个好觉。"
+    }
   ]
 }

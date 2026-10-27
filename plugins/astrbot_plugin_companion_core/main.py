@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -12,7 +13,7 @@ import yaml
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star, register
 from astrbot.core import db_helper
-from astrbot.api.message_components import File, Image, Record, Video
+from astrbot.api.message_components import File, Image, Plain, Record, Video
 from astrbot.core.agent.message import (
     AssistantMessageSegment,
     TextPart,
@@ -33,9 +34,10 @@ from .delivery_worker import DeliveryWorker, DefinitelyNotAccepted
 from .reminders import handle_reminder_command
 from .emotion import EmotionState
 from .voice_probe import VoiceProbe
+from .cloud_tts import generate as generate_speech, OWNED_AUDIO
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.2")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.3")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -150,12 +152,12 @@ class CompanionCore(Star):
         async with self.lock:
             sender = event.get_sender_id()
             bot_account = event.get_self_id()
-            if event.get_platform_name() == "weixin_oc":
+            if event.get_platform_name() in ("weixin_oc", "qq_official"):
                 bot_account = settings.get("bot_account_ids", {}).get(platform)
                 if not bot_account:
                     await event.send(
                         event.plain_result(
-                            "微信机器人账号尚未在本机核实，已暂停处理；请先由本机恢复已确认的绑定配置。"
+                            "机器人账号尚未在本机核实，已暂停处理；请先由本机恢复已确认的绑定配置。"
                         )
                     )
                     return
@@ -182,10 +184,97 @@ class CompanionCore(Star):
             text = (
                 getattr(event.message_obj, "message_str", "") or event.get_message_str()
             ).strip()
+            # Chinese command names are commonly entered directly beside a digit.
+            if match := re.fullmatch(r"/语音样本\s*(\d{1,2})", text):
+                text = "/语音样本 " + match[1]
             notice = ""
             try:
                 components = event.get_messages() or []
+                if text == "/语音帮助":
+                    await event.send(
+                        event.plain_result(
+                            "/朗读 内容：将你明确提供的这段文字送至微软 Edge 在线语音服务，使用现成音色生成音频文件，不克隆声音，不调用聊天模型或写入记忆。最多约200个汉字，本机缓存24小时。\n/语音样本 1 至 10：取已生成的公开测试音频。微信此时按音频文件发送，不是原生语音气泡；是否收到及能播放需你确认。"
+                        )
+                    )
+                    return
+                if text.startswith(("/朗读 ", "/语音样本 ")):
+                    if (self.home / "STOP").exists():
+                        await event.send(
+                            event.plain_result(
+                                "本机停止开关已开启，本次不生成或发送语音。"
+                            )
+                        )
+                        return
+                    if text.startswith("/朗读 "):
+                        spoken = text.split(" ", 1)[1].strip()
+                        if not spoken or len(spoken.encode("utf-8")) > 600:
+                            raise ValueError(
+                                "朗读内容须为1至600 UTF-8字节（约200个汉字）"
+                            )
+                        try:
+                            audio, _ = await generate_speech(
+                                spoken, self.home / "tts-cache"
+                            )
+                        except Exception:
+                            await event.send(
+                                event.plain_result(
+                                    "语音生成暂不可用，先返回文字：\n" + spoken
+                                )
+                            )
+                            return
+                    else:
+                        number = int(text.split(" ", 1)[1])
+                        if not 1 <= number <= 10:
+                            raise ValueError("格式：/语音样本 1（编号1至10）")
+                        samples = json.loads(
+                            (self.home / "tts-samples.local.json").read_text(
+                                encoding="utf-8"
+                            )
+                        )
+                        filename = samples.get(f"V{number:02}", "")
+                        if not OWNED_AUDIO.fullmatch(filename):
+                            raise ValueError("该测试样本尚未生成成功。")
+                        audio = self.home / "tts-cache" / filename
+                        if (
+                            not audio.is_file()
+                            or audio.is_symlink()
+                            or time.time() - audio.stat().st_mtime >= 24 * 3600
+                        ):
+                            raise ValueError("该测试音频已过期，请由本机重新生成。")
+                    latest = json.loads(self.settings_path.read_text(encoding="utf-8"))
+                    if (
+                        (self.home / "STOP").exists()
+                        or (
+                            platform != "webchat"
+                            and sender
+                            not in latest.get("allowed_senders", {}).get(platform, [])
+                        )
+                        or (
+                            event.get_platform_name() in ("weixin_oc", "qq_official")
+                            and latest.get("bot_account_ids", {}).get(platform)
+                            != bot_account
+                        )
+                    ):
+                        raise ValueError("本机停止或授权已变化，本次不发送语音文件。")
+                    await event.send(
+                        event.chain_result(
+                            [
+                                Plain(
+                                    "云端语音文件测试，请检查附件能否播放；这不是原生语音气泡。"
+                                ),
+                                File(name="小澄语音测试.mp3", file=str(audio)),
+                            ]
+                        )
+                    )
+                    return
                 if text == "/语音气泡测试":
+                    if settings.get("native_voice_probe_disabled_after_failure"):
+                        await event.send(
+                            event.plain_result(
+                                "本机此前测试为平台接受、手机未显示语音气泡。暂不重复同一路径，原生语音仍未通过；/语音帮助 可查看单独的音频文件测试。"
+                            )
+                        )
+                        return
                     if (
                         event.get_platform_name() != "weixin_oc"
                         or (self.home / "STOP").exists()

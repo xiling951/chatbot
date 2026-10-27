@@ -488,6 +488,123 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("运行开关", owner.sent[0])
         self.assertFalse((self.plugin.home / "voice-probe-state.local.json").exists())
 
+    async def test_cloud_speech_explicit_command_once_no_fact_or_model(self):
+        event = LocalEvent("/朗读 记住，我喜欢摇滚", "speech-command")
+        event.send = AsyncMock()
+        audio = self.plugin.home / "owned-test.mp3"
+        audio.write_bytes(b"fake audio")
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.generate_speech",
+            new_callable=AsyncMock,
+            return_value=(audio, {}),
+        ) as synth:
+            await self.plugin.handle(event)
+            await self.plugin.handle(event)
+            synth.assert_awaited_once()
+        event.send.assert_awaited_once()
+        chain = event.send.call_args.args[0].chain
+        self.assertTrue(any(isinstance(part, File) for part in chain))
+        self.assertIn("不是原生语音气泡", event.send.call_args.args[0].get_plain_text())
+        self.plugin.context.llm_generate.assert_not_awaited()
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM facts").fetchone()[0], 0
+        )
+
+    async def test_cloud_speech_stop_and_revoke_during_generation(self):
+        event = LocalEvent("/朗读 测试", "speech-stop")
+        (self.plugin.home / "STOP").touch()
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.generate_speech",
+            new_callable=AsyncMock,
+        ) as synth:
+            await self.plugin.handle(event)
+            synth.assert_not_awaited()
+        self.assertIn("不生成", event.sent[0])
+        (self.plugin.home / "STOP").unlink()
+
+        async def revoked(*_args):
+            (self.plugin.home / "STOP").touch()
+            return self.plugin.home / "not-sent.mp3", {}
+
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.generate_speech",
+            side_effect=revoked,
+        ):
+            revoked_event = LocalEvent("/朗读 测试", "speech-late-stop")
+            await self.plugin.handle(revoked_event)
+        self.assertIn("本次不发送", revoked_event.sent[0])
+
+    async def test_failed_native_probe_is_not_repeated_and_speech_has_text_fallback(
+        self,
+    ):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["native_voice_probe_disabled_after_failure"] = True
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        event = LocalEvent("/语音气泡测试", "voice-known-failure")
+        await self.plugin.handle(event)
+        self.assertIn("暂不重复", event.sent[0])
+        self.assertFalse((self.plugin.home / "voice-probe-state.local.json").exists())
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.generate_speech",
+            new_callable=AsyncMock,
+            side_effect=TimeoutError,
+        ):
+            failed = LocalEvent("/朗读 确认回退文字", "speech-timeout")
+            await self.plugin.handle(failed)
+        self.assertIn("先返回文字", failed.sent[0])
+        self.assertIn("确认回退文字", failed.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_sample_index_cannot_read_arbitrary_file(self):
+        (self.plugin.home / "tts-samples.local.json").write_text(
+            json.dumps({"V01": "../settings.local.json"})
+        )
+        event = LocalEvent("/语音样本 1", "invalid-sample-path")
+        await self.plugin.handle(event)
+        self.assertIn("尚未生成成功", event.sent[0])
+        self.assertEqual(len(event.sent), 1)
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_sample_number_with_or_without_space_uses_same_owned_file(self):
+        folder = self.plugin.home / "tts-cache"
+        folder.mkdir()
+        audio = folder / ("tts-" + "a" * 32 + ".mp3")
+        audio.write_bytes(b"fake transport test")
+        (self.plugin.home / "tts-samples.local.json").write_text(
+            json.dumps({"V01": audio.name})
+        )
+        for index, text in enumerate(("/语音样本1", "/语音样本 1", "/语音样本   01")):
+            event = LocalEvent(text, f"sample-forms-{index}")
+            event.send = AsyncMock()
+            await self.plugin.handle(event)
+            sent = event.send.call_args.args[0].chain
+            self.assertEqual(
+                [p.file for p in sent if isinstance(p, File)], [str(audio)]
+            )
+        self.plugin.context.llm_generate.assert_not_awaited()
+
+    async def test_qq_unknown_selfid_requires_trusted_appid_and_isolates_accounts(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["qq_official"] = ["owner"]
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        missing = LocalEvent(
+            "/记忆", "qq-unverified", sender="owner", platform="qq_official"
+        )
+        await self.plugin.handle(missing)
+        self.assertIn("尚未在本机核实", missing.sent[0])
+        settings["bot_account_ids"] = {"qq_official": "app-a"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        await self.plugin.handle(
+            LocalEvent(
+                "/记住 音乐=爵士", "qq-a", sender="owner", platform="qq_official"
+            )
+        )
+        settings["bot_account_ids"]["qq_official"] = "app-b"
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        different = LocalEvent("/记忆", "qq-b", sender="owner", platform="qq_official")
+        await self.plugin.handle(different)
+        self.assertEqual(different.sent, ["当前没有记忆。"])
+
     async def test_actual_weixin_account_separates_bots_even_with_same_adapter_id(self):
         settings = json.loads(self.plugin.settings_path.read_text())
         settings["allowed_senders"]["weixin_oc"] = ["owner"]
