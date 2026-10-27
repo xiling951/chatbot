@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import uuid
+import time
 from datetime import datetime, timedelta, timezone
 
 import qrcode
@@ -66,6 +67,11 @@ def active_state(home, current):
 async def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("action", choices=["create", "poll"])
+    parser.add_argument(
+        "--watch",
+        action="store_true",
+        help="Poll this same task until terminal or ten-minute limit",
+    )
     args = parser.parse_args()
     home = PLUGIN_DATA
     state_path = home / "qq-login-state.local.json"
@@ -91,29 +97,50 @@ async def main():
                         "no_messages_sent": True,
                     },
                     ensure_ascii=False,
+                ),
+                flush=True,
+            )
+            if not args.watch:
+                return
+        started = time.monotonic()
+        last_status = None
+        while time.monotonic() - started < 600:
+            state = active_state(home, datetime.now(timezone.utc))
+            try:
+                result = await poll_qqofficial_login_once(
+                    platform_config=PLATFORM,
+                    task_id=state["task_id"],
+                    bind_key=state["bind_key"],
                 )
-            )
-        else:
-            state = active_state(home, current)
-            result = await poll_qqofficial_login_once(
-                platform_config=PLATFORM,
-                task_id=state["task_id"],
-                bind_key=state["bind_key"],
-            )
+            except Exception:
+                if not args.watch:
+                    raise
+                await asyncio.sleep(2)
+                continue
             stored = save_candidate(result)
             if stored:
                 state["completed"] = True
                 state_path.write_text(json.dumps(state), encoding="utf-8")
-            print(
-                json.dumps(
-                    {
-                        "status": result.get("status"),
-                        "candidate_saved": stored,
-                        "adapter_enabled": False,
-                        "no_messages_sent": True,
-                    }
+            if result.get("status") != last_status:
+                print(
+                    json.dumps(
+                        {
+                            "status": result.get("status"),
+                            "candidate_saved": stored,
+                            "adapter_enabled": False,
+                            "no_messages_sent": True,
+                        }
+                    ),
+                    flush=True,
                 )
-            )
+                last_status = result.get("status")
+            if (
+                not args.watch
+                or stored
+                or last_status in ("expired", "error", "denied")
+            ):
+                return
+            await asyncio.sleep(2)
     except Exception as exc:
         print(
             json.dumps(

@@ -6,6 +6,7 @@ persona score. Keys and reasoning text are never printed or saved.
 """
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -27,6 +28,14 @@ def main():
         default="",
         help="Comma-separated development scenarios; empty runs the original one-prompt probe",
     )
+    parser.add_argument(
+        "--persona-file",
+        type=Path,
+        help="Optional candidate profile; direct provider evidence only",
+    )
+    parser.add_argument(
+        "--modes", choices=["both", "disabled", "enabled"], default="both"
+    )
     args = parser.parse_args()
     config = json.loads((DATA / "cmd_config.json").read_text(encoding="utf-8-sig"))
     model = next(p for p in config["provider"] if p["id"] == "companion-deepseek")
@@ -40,11 +49,11 @@ def main():
         raise SystemExit(
             "This reservation supports only the verified official Flash endpoint"
         )
-    persona = yaml.safe_load(
-        (DATA / "plugins/astrbot_plugin_companion_core/persona.yaml").read_text(
-            encoding="utf-8"
-        )
+    persona_path = (
+        args.persona_file or DATA / "plugins/astrbot_plugin_companion_core/persona.yaml"
     )
+    persona_bytes = persona_path.read_bytes()
+    persona = yaml.safe_load(persona_bytes)
     output = PLUGIN_DATA / ("thinking-comparison-" + uuid.uuid4().hex + ".local.json")
     results = []
     prompt = "我今天有点累，不用给我解决方案，陪我说两句就好。"
@@ -68,6 +77,8 @@ def main():
     cases = []
     for index, scenario in enumerate(scenarios):
         modes = ("disabled", "enabled") if index % 2 == 0 else ("enabled", "disabled")
+        if args.modes != "both":
+            modes = (args.modes,)
         for mode in modes:
             for text in scenario["turns"]:
                 cases.append((mode, scenario["id"], text))
@@ -182,6 +193,10 @@ def main():
                 json.dumps(
                     {
                         "cases": results,
+                        "persona_sha256": hashlib.sha256(persona_bytes).hexdigest(),
+                        "profile_source": "candidate file"
+                        if args.persona_file
+                        else "deployed file",
                         "persona_score": None,
                         "scope": "direct provider; no tools, persistent memory, phone or backend command execution",
                         "cost_basis": "USD peak upper estimate, not invoice; https://api-docs.deepseek.com/quick_start/pricing/ verified 2026-10-26",

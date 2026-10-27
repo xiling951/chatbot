@@ -35,9 +35,10 @@ from .reminders import handle_reminder_command
 from .emotion import EmotionState
 from .voice_probe import VoiceProbe
 from .cloud_tts import generate as generate_speech, OWNED_AUDIO
+from .owner_pairing import claim_owner
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.3")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.4")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -145,6 +146,35 @@ class CompanionCore(Star):
         if not allowed:
             event.should_call_llm(False)
             event.stop_event()
+            if event.get_platform_name() == "qq_official" and not event.get_group_id():
+                async with self.lock:
+                    adapter = next(
+                        (
+                            p
+                            for p in self.context.platform_manager.platform_insts
+                            if p.meta().id == platform
+                            and p.meta().name == "qq_official"
+                        ),
+                        None,
+                    )
+                    original = (
+                        getattr(event.message_obj, "message_str", "")
+                        or event.get_message_str()
+                    )
+                    if adapter and claim_owner(
+                        self.home,
+                        platform=platform,
+                        actual_appid=str(adapter.appid),
+                        sender=event.get_sender_id(),
+                        group=event.get_group_id(),
+                        text=original,
+                        current=datetime.now(timezone.utc),
+                    ):
+                        await event.send(
+                            event.plain_result(
+                                "已核实这个QQ本人单聊。可发送 /记忆帮助 或普通聊天；QQ和微信的记忆暂不共享，未启用QQ主动发送。"
+                            )
+                        )
             return
         event.should_call_llm(False)
         event.stop_event()

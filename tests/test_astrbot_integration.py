@@ -605,6 +605,60 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.handle(different)
         self.assertEqual(different.sent, ["当前没有记忆。"])
 
+    async def test_qq_owner_challenge_accepts_only_code_and_actual_app_without_model(
+        self,
+    ):
+        from datetime import timedelta, timezone
+        import hashlib
+
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["bot_account_ids"] = {"qq_official": "app"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        self.plugin.context.platform_manager = SimpleNamespace(
+            platform_insts=[
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="qq_official", name="qq_official"),
+                    appid="app",
+                )
+            ]
+        )
+        code = "0123456789ABCDEF"
+        (self.plugin.home / "qq-owner-claim.local.json").write_text(
+            json.dumps(
+                {
+                    "platform_id": "qq_official",
+                    "appid": "app",
+                    "owner_test_authorized": True,
+                    "used": False,
+                    "code_hash": hashlib.sha256(code.encode()).hexdigest(),
+                    "expires_at": (
+                        datetime.now(timezone.utc) + timedelta(minutes=10)
+                    ).isoformat(),
+                }
+            )
+        )
+        stranger = LocalEvent(
+            "你好", "qq-stranger", sender="outsider", platform="qq_official"
+        )
+        await self.plugin.handle(stranger)
+        self.assertEqual(stranger.sent, [])
+        owner = LocalEvent(
+            "/验证本人 " + code,
+            "qq-proof",
+            sender="actual-qq-owner",
+            platform="qq_official",
+        )
+        await self.plugin.handle(owner)
+        self.assertIn("已核实", owner.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+        settings = json.loads(self.plugin.settings_path.read_text())
+        self.assertEqual(
+            settings["allowed_senders"]["qq_official"], ["actual-qq-owner"]
+        )
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM facts").fetchone()[0], 0
+        )
+
     async def test_actual_weixin_account_separates_bots_even_with_same_adapter_id(self):
         settings = json.loads(self.plugin.settings_path.read_text())
         settings["allowed_senders"]["weixin_oc"] = ["owner"]
