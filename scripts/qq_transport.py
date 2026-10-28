@@ -4,8 +4,8 @@ Never change aiohttp itself or other AstrBot adapters. The configured proxy must
 be the owner's existing unauthenticated loopback HTTP CONNECT service.
 """
 
-import inspect
 import asyncio
+import inspect
 import ssl
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -28,6 +28,41 @@ def validate_proxy(value):
     return value.rstrip("/")
 
 
+def parse_windows_proxy(enabled, server):
+    """Accept an explicitly enabled static loopback proxy; never evaluate PAC."""
+    if enabled != 1 or not isinstance(server, str) or not server:
+        raise ValueError("Windows has no enabled static proxy")
+    if any(character.isspace() for character in server):
+        raise ValueError("Ambiguous Windows proxy endpoint")
+    if "=" in server or ";" in server:
+        endpoints = {}
+        for part in server.split(";"):
+            if not part:
+                continue
+            scheme, separator, endpoint = part.partition("=")
+            if not separator or scheme in endpoints:
+                raise ValueError("Ambiguous Windows proxy mapping")
+            endpoints[scheme] = endpoint
+        server = endpoints.get("https", "")
+        if not server:
+            raise ValueError("Windows has no explicit HTTPS proxy")
+    return validate_proxy(server if "://" in server else "http://" + server)
+
+
+def resolve_proxy(value):
+    if value != "windows":
+        return validate_proxy(value)
+    import winreg
+
+    with winreg.OpenKey(
+        winreg.HKEY_CURRENT_USER,
+        r"Software\Microsoft\Windows\CurrentVersion\Internet Settings",
+    ) as key:
+        enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
+        server = winreg.QueryValueEx(key, "ProxyServer")[0]
+    return parse_windows_proxy(enabled, server)
+
+
 class AiohttpView:
     def __init__(self, original, factory):
         self.original, self.ClientSession = original, factory
@@ -37,11 +72,11 @@ class AiohttpView:
 
 
 def install_proxy(value):
-    proxy = validate_proxy(value)
+    proxy = resolve_proxy(value)
     import aiohttp
-    import botpy.robot
-    import botpy.http
     import botpy.gateway
+    import botpy.http
+    import botpy.robot
 
     old = getattr(botpy.http, "_companion_proxy_installation", None)
     if old:
@@ -112,9 +147,9 @@ def install_proxy(value):
 
 def uninstall_proxy(installation):
     """For isolated verification; normal production changes require restart."""
-    import botpy.robot
-    import botpy.http
     import botpy.gateway
+    import botpy.http
+    import botpy.robot
 
     if getattr(botpy.http, "_companion_proxy_installation", None) is not installation:
         raise ValueError("Not the owned QQ compatibility installation")

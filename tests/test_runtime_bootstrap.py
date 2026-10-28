@@ -28,6 +28,8 @@ class BootstrapTests(unittest.TestCase):
             patch.object(sys, "argv", list(sys.argv)),
         ):
             runtime_bootstrap.main()
+            if install.call_count:
+                install.assert_called_once_with(settings["qq_loopback_proxy"])
             chdir.assert_called_once_with(root)
             run.assert_called_once_with(str(root / "main.py"), run_name="__main__")
             self.assertEqual(sys.argv, [str(root / "main.py")])
@@ -51,6 +53,16 @@ class BootstrapTests(unittest.TestCase):
             self.assertEqual(calls, 1)
             self.assertFalse(status["qq_loopback_proxy_installed"])
             self.assertEqual(status["error_type"], "ValueError")
+
+    def test_windows_proxy_selection_is_opt_in_and_recorded_without_endpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            status, calls = self.invoke(
+                Path(temp), {"qq_loopback_proxy": "windows"}
+            )
+            self.assertEqual(calls, 1)
+            self.assertTrue(status["qq_loopback_proxy_installed"])
+            self.assertEqual(status["qq_proxy_source"], "windows_static")
+            self.assertNotIn("proxy_endpoint", status)
 
 
 if __name__ == "__main__":

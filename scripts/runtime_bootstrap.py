@@ -5,7 +5,7 @@ import os
 import runpy
 import sys
 from contextlib import suppress
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from local_paths import CODE_ROOT, PLUGIN_DATA
 from qq_transport import install_proxy
@@ -13,7 +13,7 @@ from qq_transport import install_proxy
 
 def main():
     record = {
-        "at": datetime.now(timezone.utc).isoformat(),
+        "at": datetime.now(UTC).isoformat(),
         "qq_loopback_proxy_installed": False,
     }
     try:
@@ -23,7 +23,12 @@ def main():
         if settings.get("qq_loopback_proxy"):
             install_proxy(settings["qq_loopback_proxy"])
             record["qq_loopback_proxy_installed"] = True
-    except Exception as exc:
+            record["qq_proxy_source"] = (
+                "windows_static"
+                if settings["qq_loopback_proxy"] == "windows"
+                else "explicit_loopback"
+            )
+    except Exception as exc:  # noqa: BLE001 -- optional QQ setup must not block startup
         # An optional QQ problem must not prevent WeChat/Web from starting.
         record["error_type"] = type(exc).__name__
     with suppress(OSError):

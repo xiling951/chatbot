@@ -1,23 +1,62 @@
 """SDK-scoped loopback compatibility; no network calls or credentials."""
 
-import sys
 import ssl
+import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch, AsyncMock
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from qq_transport import install_proxy, uninstall_proxy, validate_proxy
+from qq_transport import (
+    install_proxy,
+    parse_windows_proxy,
+    resolve_proxy,
+    uninstall_proxy,
+    validate_proxy,
+)
 
 
 class QQTransportTests(unittest.IsolatedAsyncioTestCase):
+    async def test_windows_mode_uses_current_static_https_loopback_endpoint(self):
+        self.assertEqual(
+            parse_windows_proxy(1, "127.0.0.1:58301"),
+            "http://127.0.0.1:58301",
+        )
+        self.assertEqual(
+            parse_windows_proxy(1, "http=127.0.0.1:7890;https=[::1]:58301;"),
+            "http://[::1]:58301",
+        )
+        with (
+            patch("winreg.OpenKey") as opened,
+            patch("winreg.QueryValueEx", side_effect=[(1, 4), ("127.0.0.1:58301", 1)]),
+        ):
+            self.assertEqual(resolve_proxy("windows"), "http://127.0.0.1:58301")
+            opened.assert_called_once()
+
+    async def test_windows_mode_rejects_disabled_pac_remote_or_ambiguous_settings(self):
+        for enabled, server in (
+            (0, "127.0.0.1:7890"),
+            (1, ""),
+            (1, "https://example.com/proxy.pac"),
+            (1, "https=proxy.example.com:8080"),
+            (1, "http=127.0.0.1:7890"),
+            (1, "socks=127.0.0.1:7890"),
+            (1, "https=127.0.0.1:7890;https=127.0.0.1:7891"),
+            (1, "https=127.0.0.1:7890;bad"),
+            (1, "127.0.0.1:7890;127.0.0.1:7891"),
+            (1, "http://user:secret@127.0.0.1:7890"),
+            (1, " http://127.0.0.1:7890"),
+        ):
+            with self.subTest(enabled=enabled, server=server), self.assertRaises(ValueError):
+                parse_windows_proxy(enabled, server)
+
     async def test_only_qq_token_http_and_gateway_sessions_use_explicit_local_proxy(
         self,
     ):
         import aiohttp
-        import botpy.robot
-        import botpy.http
         import botpy.gateway
+        import botpy.http
+        import botpy.robot
 
         original = aiohttp.ClientSession
         installation = install_proxy("http://127.0.0.1:7890")
