@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from local_backup import dpapi, encode, decode, memory_pair, prune, maybe_backup
-from local_backup import collect_emote_assets
+from local_backup import collect_emote_assets, collect_host_scripts, HOST_SCRIPTS
 from plugins.astrbot_plugin_companion_core.memory import MemoryStore
 
 
@@ -29,6 +29,27 @@ class BackupTests(unittest.TestCase):
         tampered[-1] ^= 1
         with self.assertRaises(OSError):
             dpapi(bytes(tampered), decrypt=True)
+
+    def test_explicit_startup_scripts_are_backed_up_without_recursing_private_project_files(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / "scripts").mkdir()
+            for name in HOST_SCRIPTS:
+                (root / "scripts" / name).write_text(
+                    "controlled fixture", encoding="utf-8"
+                )
+            (root / "scripts/private.local.json").write_text(
+                "not included", encoding="utf-8"
+            )
+            files = collect_host_scripts(root)
+            self.assertEqual(len(files), len(HOST_SCRIPTS))
+            self.assertIn("deployment/scripts/runtime_bootstrap.py", files)
+            self.assertFalse(any(".local." in name for name in files))
+            (root / "scripts/start.ps1").unlink()
+            with self.assertRaises(ValueError):
+                collect_host_scripts(root)
 
     def test_static_emote_material_included_but_other_files_and_caches_excluded(self):
         import shutil

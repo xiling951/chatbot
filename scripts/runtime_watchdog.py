@@ -81,6 +81,39 @@ def process_start_ticks(pid: int) -> int | None:
         kernel.CloseHandle(handle)
 
 
+def controlled_platforms(config=None, settings=None):
+    config = read_json(DATA / "cmd_config.json") if config is None else config
+    settings = (
+        read_json(PLUGIN_DATA / "settings.local.json") if settings is None else settings
+    )
+    owned = {"companion-weixin": "weixin_oc", "companion-qq": "qq_official"}
+    result = {}
+    for item in config.get("platform", []):
+        identifier = item.get("id")
+        if (
+            identifier not in owned
+            or item.get("type") != owned[identifier]
+            or item.get("enable") is not True
+        ):
+            continue
+        owners = settings.get("allowed_senders", {}).get(identifier, [])
+        account = settings.get("bot_account_ids", {}).get(identifier)
+        if (
+            not isinstance(owners, list)
+            or len(owners) != 1
+            or not isinstance(owners[0], str)
+            or not owners[0]
+            or not account
+        ):
+            continue
+        if owned[identifier] == "qq_official" and str(item.get("appid")) != str(
+            account
+        ):
+            continue
+        result[identifier] = owned[identifier]
+    return result
+
+
 def observe() -> dict:
     sample = {
         "at": datetime.now(timezone.utc).isoformat(),
@@ -88,6 +121,8 @@ def observe() -> dict:
         "dashboard_http_ok": False,
         "model_probe": "not_run",
         "device_delivery": "not_observed",
+        "channels": {},
+        "channels_observed": False,
         "channel": {
             "adapter_running": False,
             "configured": False,
@@ -118,12 +153,26 @@ def observe() -> dict:
                 )
                 response = client.get("/api/platform/stats")
                 response.raise_for_status()
+                platforms = response.json()["data"]["platforms"]
+                if not isinstance(platforms, list):
+                    raise ValueError("Invalid platform observation")
+                for identifier in controlled_platforms():
+                    current = next(
+                        (p for p in platforms if p.get("id") == identifier), None
+                    )
+                    sample["channels"][identifier] = {
+                        "status": current.get("status") if current else "missing",
+                        "adapter_running": bool(
+                            current and current.get("status") == "running"
+                        ),
+                        "configured": True,
+                        "has_reported_error": bool(
+                            current and current.get("last_error")
+                        ),
+                    }
+                sample["channels_observed"] = True
                 platform = next(
-                    (
-                        p
-                        for p in response.json()["data"]["platforms"]
-                        if p.get("id") == "companion-weixin"
-                    ),
+                    (p for p in platforms if p.get("id") == "companion-weixin"),
                     None,
                 )
                 if platform:
@@ -165,6 +214,78 @@ class RecoveryPolicy:
         self.state["restart_times"].append(current.isoformat())
         self.state["failures"] = 0
         return "restart_owned" if sample["process_alive"] else "start"
+
+    def decide_channels(self, sample, current, stopped):
+        state = self.state.setdefault("channels", {})
+        if (
+            stopped
+            or not sample.get("channels_observed")
+            or not sample.get("process_alive")
+            or not sample.get("dashboard_http_ok")
+        ):
+            for entry in state.values():
+                entry["failures"] = 0
+            return {}
+        actions = {}
+        for identifier, observed in sample.get("channels", {}).items():
+            if identifier not in ("companion-weixin", "companion-qq"):
+                continue
+            entry = state.setdefault(identifier, {"failures": 0, "reload_times": []})
+            if observed.get("status") == "running":
+                entry["failures"] = 0
+                actions[identifier] = "running_reported"
+                continue
+            entry["failures"] += 1
+            entry["reload_times"] = [
+                t
+                for t in entry["reload_times"]
+                if datetime.fromisoformat(t) > current - timedelta(minutes=15)
+            ]
+            if entry["failures"] < 3:
+                actions[identifier] = "wait_for_channel_health"
+            elif len(entry["reload_times"]) >= 3:
+                actions[identifier] = "channel_reload_backoff"
+            else:
+                entry["reload_times"].append(current.isoformat())
+                entry["failures"] = 0
+                actions[identifier] = "reload_owned_adapter"
+        for identifier in set(state) - set(sample.get("channels", {})):
+            state[identifier]["failures"] = 0
+        return actions
+
+
+def reload_adapter(identifier):
+    if (PLUGIN_DATA / "STOP").exists() or identifier not in controlled_platforms():
+        return {"operation": "cancelled_before_adapter_reload"}
+    saved = read_json(DATA / "companion-process.local.json")
+    if process_start_ticks(int(saved["id"])) != int(saved["started_ticks"]):
+        return {"operation": "process_identity_mismatch"}
+    auth = read_json(DATA / "admin.local.json")
+    try:
+        with httpx.Client(
+            base_url="http://127.0.0.1:6185", trust_env=False, timeout=8
+        ) as client:
+            login = client.post(
+                "/api/auth/login",
+                json={"username": auth["username"], "password": auth["password"]},
+            )
+            login.raise_for_status()
+            client.headers["Authorization"] = "Bearer " + login.json()["data"]["token"]
+            if (
+                PLUGIN_DATA / "STOP"
+            ).exists() or identifier not in controlled_platforms():
+                return {"operation": "cancelled_before_adapter_reload"}
+            response = client.patch(
+                "/api/v1/bots/enabled", json={"bot_id": identifier, "enabled": True}
+            )
+            response.raise_for_status()
+            return {
+                "operation": "adapter_reload_requested",
+                "http_status": response.status_code,
+                "device_delivery": "not_observed",
+            }
+    except Exception as exc:
+        return {"operation": "adapter_reload_unknown", "error_type": type(exc).__name__}
 
 
 def recover(action: str) -> dict:
@@ -229,6 +350,17 @@ def run_once(
             save_state(state_path, policy.state)
         sample["recovery"] = recover(action)
         sample["after_recovery"] = observe()
+    channel_actions = policy.decide_channels(
+        sample, datetime.now(timezone.utc), (PLUGIN_DATA / "STOP").exists()
+    )
+    sample["channel_decisions"] = channel_actions
+    if allow_recovery and state_path is not None and action == "healthy":
+        for identifier, channel_action in channel_actions.items():
+            if channel_action == "reload_owned_adapter":
+                save_state(state_path, policy.state)
+                sample.setdefault("channel_recovery", {})[identifier] = reload_adapter(
+                    identifier
+                )
     return sample
 
 

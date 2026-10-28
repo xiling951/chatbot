@@ -17,3 +17,13 @@
 观察统计：运行目录 Python 执行 scripts/availability_report.py --save。只统计已结束的 30 秒时隙，开放/未来时隙不计分；同一时隙采用最差状态，缺样保留 unknown，同时给可用率上下界。窗口未结束时明确 in_progress，不提前宣布达到 72 小时目标；本地状态不能推导模型或手机可用率。
 
 后台观察循环也检查本机加密备份：清醒且登录运行时每 24 小时一份，失败后退避一小时，失败不停止观察。备份在 F:/chatbot-backups，保留 7 天，仅淘汰本项目精确命名的完整加密文件，不清除最新删除账本。休眠/关机期间不执行，因此 24 小时是在线条件下的 RPO 目标，非停机关机保证。流程与同机解密限制见 backup_restore.md。
+
+## QQ连接与独立恢复
+
+当前start.ps1使用同一虚拟环境执行runtime_bootstrap.py，再进入固定AstrBot main.py；代码与SDK安装文件未改。只有私有settings.local.json显式配置qq_loopback_proxy时，才在QQ SDK自己的令牌/API/网关会话使用已有本机HTTP代理；仅允许无凭据的回环地址，不切换Clash线路、不修改系统代理，也不影响微信/模型的会话。QQ新建连接使用验证服务器证书的客户端TLS上下文，并复用API连接；只读GET最多增加一次连接重试，POST/图片/消息不新增重试。状态写在qq-transport-status.local.json。
+
+本机现有代理的监听进程已核对为verge-mihomo。独立预检保留了成功令牌/身份及网关连接失败，不将预检错误当作已恢复；2026-10-28T08:58 UTC实际应用后，用户确认QQ /记忆帮助恢复、剩余九段原生语音及图片正常。完整QQ语音10/10含前次样本1，不是微信原生通过。当前QQ会依赖用户已有代理服务在线；未改其开机设置，真实重启仍待验。
+
+守护新增companion-weixin/companion-qq逐入口状态。后台正常但某个入口连续3次不是running时，只重载该已启用、账号一致、唯一owner的本人测试入口；每入口15分钟最多3次，提交前保存预算，STOP、用户禁用、白名单或账号变更均阻断。旧错误但当前running不反复重载；状态接口缺样不当作成功。该自动重载不会发测试消息或开启主动权限；新策略已有本地检查，主动制造故障的新版QQ恢复演练未做。
+
+availability_report.py保留原窗口和微信adapter_report口径，另列qq_adapter_report。旧记录没有QQ字段时保持unknown，不能用微信健康补成QQ健康；原始QQ离线/重连失败证据仍在受限运行目录及P6报告。只读检查scripts/runtime_watchdog.py --once不执行重载。此配置已在同一现有服务应用，不建立第二实例。

@@ -21,6 +21,20 @@ from pathlib import Path
 from filelock import FileLock
 from local_paths import DATA, PLUGIN_DATA, PROJECT_ROOT
 
+HOST_SCRIPTS = (
+    "start.ps1",
+    "stop.ps1",
+    "recover_owned.ps1",
+    "supervise_runtime.ps1",
+    "runtime_bootstrap.py",
+    "qq_transport.py",
+    "runtime_watchdog.py",
+    "local_paths.py",
+    "stop_proactive.py",
+    "local_backup.py",
+    "availability_report.py",
+)
+
 BACKUP_ROOT = Path("F:/chatbot-backups")
 ENTROPY = b"CompanionCore local snapshot v1"
 NAME = re.compile(r"companion-(\d{8}T\d{6})-[0-9a-f]{32}\.dpapi")
@@ -155,6 +169,7 @@ def collect(data=DATA, home=PLUGIN_DATA):
         content = root_config.read_bytes()
         json.loads(content)
         files["deployment/runtime_root.local.json"] = content
+    files.update(collect_host_scripts(PROJECT_ROOT))
     plugin = data / "plugins" / "astrbot_plugin_companion_core"
     for path in plugin.iterdir():
         if (
@@ -201,6 +216,21 @@ def collect_emote_assets(plugin):
         result[path.relative_to(plugin).as_posix()] = path.read_bytes()
     if "assets/emotes/manifest.json" not in result:
         raise ValueError("Static emote manifest missing from backup")
+    return result
+
+
+def collect_host_scripts(project):
+    result = {}
+    scripts = project / "scripts"
+    for name in HOST_SCRIPTS:
+        source = scripts / name
+        if (
+            source.is_symlink()
+            or not source.is_file()
+            or source.resolve().parent != scripts.resolve()
+        ):
+            raise ValueError("Required controlled startup script missing or redirected")
+        result["deployment/scripts/" + name] = source.read_bytes()
     return result
 
 

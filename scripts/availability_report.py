@@ -16,7 +16,12 @@ def classify(row, layer):
     if layer in ("process", "dashboard"):
         value = row.get("process_alive" if layer == "process" else "dashboard_http_ok")
         return "healthy" if value is True else "failed" if value is False else "unknown"
-    channel = row.get("channel") or {}
+    if layer == "qq_adapter_report":
+        channel = (row.get("channels") or {}).get("companion-qq")
+        if not isinstance(channel, dict):
+            return "unknown"
+    else:
+        channel = row.get("channel") or {}
     values = [
         row.get("process_alive"),
         row.get("dashboard_http_ok"),
@@ -37,7 +42,10 @@ def summarize(rows, current, *, start=WINDOW_START, hours=WINDOW_HOURS):
     elapsed = min(
         expected, max(0, math.floor((current - start).total_seconds() / SLOT_SECONDS))
     )
-    bins = {layer: {} for layer in ("process", "dashboard", "adapter_report")}
+    bins = {
+        layer: {}
+        for layer in ("process", "dashboard", "adapter_report", "qq_adapter_report")
+    }
     rank = {"healthy": 0, "unknown": 1, "failed": 2}
     ignored = 0
     model_probes = 0
@@ -90,6 +98,7 @@ def summarize(rows, current, *, start=WINDOW_START, hours=WINDOW_HOURS):
         "recorded_model_probe_samples": model_probes,
         "model_available_percent": None,
         "device_delivery_percent": None,
+        "legacy_adapter_scope": "adapter_report is companion-weixin only; older records have no QQ observation and remain unknown",
         "notes": "Worst state per completed slot; missing is unknown; open/future slots not scored. Local HTTP/adapter state does not prove model or device availability.",
     }
 

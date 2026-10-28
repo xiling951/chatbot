@@ -23,3 +23,5 @@ compare_thinking.py 与插件共享计数锁，可在服务运行时测试，逐
 测试：在 F:/chatbot 下将 PYTHONPATH 设为 `F:/chatbot-runtime/AstrBot;F:/chatbot`、ASTRBOT_ROOT 设为 config/runtime_root.local.json 的 runtime_root，再用 F 盘 AstrBot 的 `.venv/Scripts/python.exe -m unittest discover -s tests -p "test_*.py" -v`。框架事件测试使用假模型和假发送，不产生费用。scripts/local_paths.py 统一维护代码/私有数据两条路径。
 
 官方部署与接口：[源码部署](https://docs.astrbot.app/deploy/astrbot/cli.html)、[官方仓库固定版本](https://github.com/AstrBotDevs/AstrBot/tree/v4.29.3)。
+
+启动现经scripts/runtime_bootstrap.py进入同一固定AstrBot主程序；QQ专用代理兼容和逐入口守护见deployment.md。私有qq_loopback_proxy指向已有本机代理，不修改系统线路。独立诊断check_qq_transport.py仅检查令牌/身份/网关Hello，不发送IM或鉴权为第二在线实例；预检失败必须保留，不以命令退出码0代替内容成功。运维启动/恢复脚本现也进入受控加密快照，整体253项检查通过。

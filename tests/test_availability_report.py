@@ -71,3 +71,22 @@ class AvailabilityTests(unittest.TestCase):
         self.assertEqual(result["invalid_timestamps"], 2)
         self.assertEqual(result["layers"]["process"]["healthy"], 1)
         self.assertEqual(result["layers"]["adapter_report"]["unknown"], 1)
+
+    def test_legacy_weixin_success_does_not_backfill_qq_health(self):
+        row = self.sample(0)
+        result = summarize([row], self.start + timedelta(seconds=30), start=self.start)
+        self.assertEqual(result["layers"]["adapter_report"]["healthy"], 1)
+        self.assertEqual(result["layers"]["qq_adapter_report"]["unknown"], 1)
+
+    def test_qq_failure_does_not_change_recorded_weixin_success(self):
+        row = self.sample(0)
+        row["channels"] = {
+            "companion-qq": {
+                "adapter_running": False,
+                "configured": True,
+                "has_reported_error": True,
+            }
+        }
+        result = summarize([row], self.start + timedelta(seconds=30), start=self.start)
+        self.assertEqual(result["layers"]["adapter_report"]["healthy"], 1)
+        self.assertEqual(result["layers"]["qq_adapter_report"]["failed"], 1)

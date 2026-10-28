@@ -34,7 +34,8 @@ foreach ($taskLogName in @('stdout', 'stderr')) {
         Move-Item -LiteralPath $taskOldLog -Destination $taskArchiveLog
     }
 }
-$taskProcess = Start-Process -FilePath (Join-Path $taskRuntime '.venv\Scripts\python.exe') -ArgumentList @('main.py') -WorkingDirectory $taskRuntime -WindowStyle Hidden -RedirectStandardOutput (Join-Path $taskDataRoot 'data\stdout.local.log') -RedirectStandardError (Join-Path $taskDataRoot 'data\stderr.local.log') -PassThru
+$taskBootstrap = Join-Path $PSScriptRoot 'runtime_bootstrap.py'
+$taskProcess = Start-Process -FilePath (Join-Path $taskRuntime '.venv\Scripts\python.exe') -ArgumentList @($taskBootstrap) -WorkingDirectory $taskRuntime -WindowStyle Hidden -RedirectStandardOutput (Join-Path $taskDataRoot 'data\stdout.local.log') -RedirectStandardError (Join-Path $taskDataRoot 'data\stderr.local.log') -PassThru
 @{ id = $taskProcess.Id; started_ticks = $taskProcess.StartTime.ToUniversalTime().Ticks } | ConvertTo-Json | Set-Content -LiteralPath $taskProcessFile -Encoding UTF8
 $taskReady = $false
 for ($taskAttempt = 0; $taskAttempt -lt 40; $taskAttempt++) {
