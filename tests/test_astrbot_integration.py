@@ -839,6 +839,91 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(group.sent, [])
         self.plugin.context.llm_generate.assert_not_awaited()
 
+    async def test_bilibili_source_record_recall_budget_delete_and_no_automatic_action(
+        self,
+    ):
+        from datetime import timezone
+        from plugins.astrbot_plugin_companion_core.bilibili import VideoMetadata
+
+        metadata = VideoMetadata(
+            "BV1xx411c7mD",
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+            "公开样本标题",
+            "公开作者",
+            "这是简介内容。" * 100,
+            datetime.now(timezone.utc).isoformat(),
+        )
+        # A bounded API fixture, not evidence of reading the real site.
+        from dataclasses import replace
+
+        metadata = replace(
+            metadata,
+            description=metadata.description.encode()[:900].decode(errors="ignore"),
+        )
+        reader = SimpleNamespace(read=AsyncMock(return_value=metadata))
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.BilibiliReader",
+            return_value=reader,
+        ):
+            event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-read")
+            await self.plugin.handle(event)
+            self.assertIn("未观看视频", event.sent[0])
+            self.assertEqual(reader.read.await_count, 1)
+            self.plugin.context.llm_generate.assert_not_awaited()
+            duplicate = LocalEvent("/B站读取 BV1xx411c7mD", "bili-again")
+            await self.plugin.handle(duplicate)
+            self.assertIn("今天已进行过一次", duplicate.sent[0])
+            self.assertEqual(reader.read.await_count, 1)
+        await self.plugin.handle(LocalEvent("你最近读过什么B站资料", "bili-recall"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertIn("公开样本标题", request["system_prompt"])
+        self.assertIn("external_metadata", request["system_prompt"])
+        self.assertIn("未读取视频正文", request["system_prompt"])
+        await self.plugin.handle(LocalEvent("/忘记 B站活动", "bili-delete"))
+        await self.plugin.handle(LocalEvent("你读过什么B站资料", "bili-forgotten"))
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertNotIn("公开样本标题", request["system_prompt"])
+        self.assertEqual(request["contexts"], [])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM tasks").fetchone()[0], 0
+        )
+
+    async def test_bilibili_failure_stop_and_disabled_memory_do_not_invent_activity(
+        self,
+    ):
+        from plugins.astrbot_plugin_companion_core.bilibili import ReadFailed
+
+        reader = SimpleNamespace(read=AsyncMock(side_effect=ReadFailed("http_412")))
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.BilibiliReader",
+            return_value=reader,
+        ):
+            event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-412")
+            await self.plugin.handle(event)
+            self.assertIn("未取得", event.sent[0])
+            self.assertIn("http_412", event.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM events").fetchone()[0], 0
+        )
+        (self.plugin.home / "STOP").touch()
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.BilibiliReader"
+        ) as factory:
+            event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-stop")
+            await self.plugin.handle(event)
+            self.assertIn("停止", event.sent[0])
+            factory.assert_not_called()
+        (self.plugin.home / "STOP").unlink()
+        await self.plugin.handle(LocalEvent("/停止记忆", "bili-disable-memory"))
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.BilibiliReader"
+        ) as factory:
+            event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-disabled")
+            await self.plugin.handle(event)
+            self.assertIn("Memory disabled", event.sent[0])
+            factory.assert_not_called()
+        self.plugin.context.llm_generate.assert_not_awaited()
+
 
 if __name__ == "__main__":
     unittest.main()

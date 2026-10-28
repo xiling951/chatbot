@@ -34,10 +34,12 @@ def main():
             "privacy",
             "automatic",
             "safeguards",
+            "discovery",
         ],
         default="memory",
     )
     parser.add_argument("--m01-indices", default=",".join(str(i) for i in range(1, 21)))
+    parser.add_argument("--discovery-bvid", default="BV1xx411c7mD")
     args = parser.parse_args()
     limit = 10 if args.persona_set == "heldout" else 20
     if (
@@ -175,7 +177,37 @@ def main():
             )
 
         try:
-            if args.suite == "safeguards":
+            if args.suite == "discovery":
+                reply = send("/B站读取 " + args.discovery_bvid)
+                state = json.loads(send("/导出记忆"))
+                activities = [
+                    r for r in state["events"] if r["kind"] == "public_metadata"
+                ]
+                report["discovery"] = {
+                    "command_reply": reply,
+                    "successful_activities": len(activities),
+                    "activity": json.loads(activities[0]["content"])
+                    if activities
+                    else None,
+                    "personal_facts_added": len(state["facts"]),
+                    "recall_reply": send(
+                        "你此前实际读过什么B站资料？请明确区分视频正文与简介，没取得资料就直说。"
+                    ),
+                    "seven_real_activities_gate": "not_passed",
+                }
+                if (
+                    activities
+                    and json.loads(activities[0]["content"])["title"]
+                    not in report["discovery"]["recall_reply"]
+                ):
+                    raise RuntimeError(
+                        "Real-model activity recall did not include the recorded title"
+                    )
+                if not activities and "取得公开标题" in reply:
+                    raise RuntimeError(
+                        "Claimed discovery without a successful activity record"
+                    )
+            elif args.suite == "safeguards":
                 for command, expected in [
                     ("/主动状态", "主动总开关：关"),
                     ("/允许主动", "没有安排提醒"),

@@ -11,6 +11,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from .binding import BindingStore, LEDGER_SCHEMA
 
@@ -55,6 +56,7 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS ledger.automatic(scope TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS ledger.proactive(scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, enabled INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS ledger.submissions(idempotency_key TEXT PRIMARY KEY, scope TEXT NOT NULL, state TEXT NOT NULL, local_day TEXT NOT NULL, submitted_at TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at TEXT);
+            CREATE TABLE IF NOT EXISTS ledger.discovery_days(day TEXT PRIMARY KEY, scope TEXT NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, at TEXT NOT NULL);
         """)
         self.db.executescript(LEDGER_SCHEMA)
         self.binding = BindingStore(self)
@@ -434,6 +436,61 @@ class MemoryStore:
             )
         ]
 
+    def reserve_discovery(self, ticket: Ticket, current: datetime):
+        # One actual attempt per Beijing day for this single-instance project.
+        # The latest ledger, not a restorable cache, owns the daily limit.
+        day = current.astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        with self.db:
+            self._check_ticket(ticket)
+            inserted = self.db.execute(
+                "INSERT OR IGNORE INTO ledger.discovery_days VALUES(?,?,?,'requested','',?)",
+                (day, ticket.scope, ticket.source, current.isoformat()),
+            ).rowcount
+            if not inserted:
+                raise ValueError(
+                    "北京时间今天已进行过一次B站读取尝试；失败也不自动重试，避免反复请求。"
+                )
+        return day
+
+    def finish_discovery(self, ticket: Ticket, day: str, metadata=None, *, error=""):
+        from .bilibili import VideoMetadata
+
+        with self.db:
+            row = self.db.execute(
+                "SELECT state,scope,source FROM ledger.discovery_days WHERE day=?",
+                (day,),
+            ).fetchone()
+            if not row or tuple(row) != ("requested", ticket.scope, ticket.source):
+                raise ValueError("没有匹配的本次读取尝试，不能记录活动。")
+            self._check_ticket(ticket)
+            if metadata is not None:
+                if not isinstance(metadata, VideoMetadata) or error:
+                    raise ValueError("只有已校验的公开元数据可作为外部读取记录。")
+                content = json.dumps(metadata.data(), ensure_ascii=False)
+                if len(content.encode()) > 2400:
+                    raise ValueError("External metadata exceeds storage bound")
+                self.db.execute(
+                    "INSERT INTO events VALUES(?,?, 'public_metadata',?,?, 'external_metadata',?,?)",
+                    (
+                        uuid.uuid4().hex,
+                        ticket.scope,
+                        content,
+                        ticket.source,
+                        metadata.fetched_at,
+                        now(),
+                    ),
+                )
+            elif not re.fullmatch(r"[a-z0-9_]{1,80}", error):
+                raise ValueError("读取失败必须有受限失败类别；不能伪造成功活动。")
+            self.db.execute(
+                "UPDATE ledger.discovery_days SET state=?,result=? WHERE day=?",
+                (
+                    "fetched" if metadata else "failed",
+                    "metadata_only" if metadata else error,
+                    day,
+                ),
+            )
+
     def relationship(self, scope: str) -> list[dict]:
         enabled = self.db.execute(
             "SELECT enabled FROM scopes WHERE scope=?", (scope,)
@@ -456,11 +513,28 @@ class MemoryStore:
                 (scope, predicate, predicate),
             ).fetchall()
         )
-        if predicate is None or predicate == "共同事件":
+        if predicate is None:
             rows += self.db.execute(
                 "SELECT id,source FROM events WHERE scope=?", (scope,)
             ).fetchall()
             self.db.execute("DELETE FROM events WHERE scope=?", (scope,))
+        elif predicate == "共同事件":
+            rows += self.db.execute(
+                "SELECT id,source FROM events WHERE scope=? AND kind IN ('user_reported','shared_plan')",
+                (scope,),
+            ).fetchall()
+            self.db.execute(
+                "DELETE FROM events WHERE scope=? AND kind IN ('user_reported','shared_plan')",
+                (scope,),
+            )
+        elif predicate == "B站活动":
+            rows += self.db.execute(
+                "SELECT id,source FROM events WHERE scope=? AND kind='public_metadata'",
+                (scope,),
+            ).fetchall()
+            self.db.execute(
+                "DELETE FROM events WHERE scope=? AND kind='public_metadata'", (scope,)
+            )
         self._invalidate_pending(scope)
         for row in rows:
             self.db.execute(
