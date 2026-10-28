@@ -163,6 +163,8 @@ def collect(data=DATA, home=PLUGIN_DATA):
             and path.suffix in {".py", ".sql", ".yaml", ".txt"}
         ):
             files[path.relative_to(data).as_posix()] = path.read_bytes()
+    for name, content in collect_emote_assets(plugin).items():
+        files[(plugin.relative_to(data) / name).as_posix()] = content
     framework = data / "data_v4.db"
     if framework.exists():
         with closing(
@@ -170,6 +172,36 @@ def collect(data=DATA, home=PLUGIN_DATA):
         ) as source:
             files["data_v4.db"] = sqlite_bytes(source)
     return files, ledger_id
+
+
+def collect_emote_assets(plugin):
+    # Only the static, named project asset set; never recurse into chat caches.
+    root = plugin / "assets" / "emotes"
+    if not root.exists():
+        return {}
+    if (
+        root.is_symlink()
+        or (plugin / "assets").is_symlink()
+        or root.resolve().parent != plugin.resolve() / "assets"
+    ):
+        raise ValueError("Emote asset root escaped plugin material")
+    result = {}
+    for path in root.iterdir():
+        if path.name != "manifest.json" and not re.fullmatch(
+            r"E(?:0[1-9]|[1-4][0-9]|50)\.(?:svg|png)", path.name
+        ):
+            continue
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or path.resolve().parent != root.resolve()
+            or path.stat().st_size > 128 * 1024
+        ):
+            raise ValueError("Invalid static asset in backup")
+        result[path.relative_to(plugin).as_posix()] = path.read_bytes()
+    if "assets/emotes/manifest.json" not in result:
+        raise ValueError("Static emote manifest missing from backup")
+    return result
 
 
 def encode(files, ledger_id, current):

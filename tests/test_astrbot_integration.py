@@ -924,6 +924,171 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             factory.assert_not_called()
         self.plugin.context.llm_generate.assert_not_awaited()
 
+    async def test_emotes_default_off_control_removed_and_no_extra_model_call(self):
+        self.plugin.context.llm_generate.return_value.completion_text = (
+            "你好。\n[[EMOTE:greeting]]"
+        )
+        event = LocalEvent("你好", "emote-default")
+        event.send = AsyncMock()
+        await self.plugin.handle(event)
+        event.send.assert_awaited_once()
+        self.assertEqual(event.send.call_args.args[0].get_plain_text(), "你好。")
+        self.assertNotIn(
+            "[[EMOTE:",
+            self.plugin.context.llm_generate.call_args.kwargs["system_prompt"],
+        )
+        self.plugin.context.llm_generate.assert_awaited_once()
+
+    async def test_emotes_opt_in_one_image_cooldown_and_natural_opt_out(self):
+        await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
+        self.plugin.context.llm_generate.return_value.completion_text = (
+            "你好。\n[[EMOTE:greeting]]"
+        )
+        first = LocalEvent("你好", "emote-first")
+        first.send = AsyncMock()
+        await self.plugin.handle(first)
+        self.assertEqual(first.send.await_count, 2)
+        self.assertEqual(
+            first.send.call_args_list[0].args[0].get_plain_text(), "你好。"
+        )
+        self.assertIsInstance(first.send.call_args_list[1].args[0].chain[0], Image)
+        self.assertIn("E01.png", first.send.call_args_list[1].args[0].chain[0].file)
+        second = LocalEvent("再聊两句", "emote-cooldown")
+        second.send = AsyncMock()
+        await self.plugin.handle(second)
+        second.send.assert_awaited_once()
+        await self.plugin.handle(LocalEvent("以后不要发表情", "emote-off"))
+        self.assertEqual(self.plugin.context.llm_generate.await_count, 2)
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        self.assertFalse(self.plugin.store.emotes.enabled(scope))
+        self.assertNotIn(
+            "[[EMOTE:", str(self.plugin.store.history(scope, first.get_session_id()))
+        )
+
+    async def test_emotes_serious_current_and_recent_topic_block_inappropriate_model_intent(
+        self,
+    ):
+        await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
+        self.plugin.context.llm_generate.return_value.completion_text = (
+            "我听着。\n[[EMOTE:joy]]"
+        )
+        for text, identifier in (
+            ("我家猫去世了", "emote-grief"),
+            ("谢谢你听我说", "emote-recent-grief"),
+        ):
+            event = LocalEvent(text, identifier)
+            event.send = AsyncMock()
+            await self.plugin.handle(event)
+            event.send.assert_awaited_once()
+            self.assertNotIn("[[EMOTE:", event.send.call_args.args[0].get_plain_text())
+
+    async def test_emote_manual_samples_accept_compact_form_without_model_or_auto_enable(
+        self,
+    ):
+        for index, command in enumerate(("/表情样本1", "/表情样本 E01")):
+            event = LocalEvent(command, f"emote-sample-{index}")
+            event.send = AsyncMock()
+            await self.plugin.handle(event)
+            self.assertEqual(event.send.await_count, 2)
+            self.assertIsInstance(event.send.call_args_list[1].args[0].chain[0], Image)
+        self.plugin.context.llm_generate.assert_not_awaited()
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        self.assertFalse(self.plugin.store.emotes.enabled(scope))
+        self.assertEqual(self.plugin.store.facts(scope), [])
+
+    async def test_emote_unknown_image_failure_keeps_text_once_never_retries(self):
+        await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
+        self.plugin.context.llm_generate.return_value.completion_text = (
+            "你好。\n[[EMOTE:greeting]]"
+        )
+        event = LocalEvent("你好", "emote-image-failed")
+        sent = []
+
+        async def transport(message):
+            sent.append(message)
+            if any(isinstance(item, Image) for item in message.chain):
+                raise OSError("simulated transport uncertainty")
+
+        event.send = transport
+        await self.plugin.handle(event)
+        await self.plugin.handle(event)
+        self.assertEqual(len(sent), 2)
+        self.assertEqual(sum(bool(m.get_plain_text()) for m in sent), 1)
+        self.assertEqual(
+            self.plugin.store.db.execute(
+                "SELECT state FROM ledger.emote_submissions"
+            ).fetchone()[0],
+            "unknown",
+        )
+        self.plugin.context.llm_generate.assert_awaited_once()
+
+    async def test_emote_stop_after_text_prevents_image_submission(self):
+        await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
+        self.plugin.context.llm_generate.return_value.completion_text = (
+            "你好。\n[[EMOTE:greeting]]"
+        )
+        event = LocalEvent("你好", "emote-stop-after-text")
+        sent = []
+
+        async def transport(message):
+            sent.append(message)
+            (self.plugin.home / "STOP").touch()
+
+        event.send = transport
+        await self.plugin.handle(event)
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(
+            self.plugin.store.db.execute(
+                "SELECT count(*) FROM ledger.emote_submissions"
+            ).fetchone()[0],
+            0,
+        )
+
+    async def test_emote_stale_reply_after_forget_is_neither_text_leak_nor_image(self):
+        await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+
+        async def generation(**kwargs):
+            self.plugin.store.forget(scope)
+            return LLMResponse(
+                "assistant", completion_text="不该返回的旧秘密\n[[EMOTE:joy]]"
+            )
+
+        self.plugin.context.llm_generate.side_effect = generation
+        event = LocalEvent("你好", "emote-stale")
+        event.send = AsyncMock()
+        await self.plugin.handle(event)
+        event.send.assert_awaited_once()
+        self.assertNotIn("旧秘密", event.send.call_args.args[0].get_plain_text())
+
+    async def test_qq_image_rechecks_owner_after_upload_without_submitting_to_removed_owner(
+        self,
+    ):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["qq_official"] = ["owner"]
+        settings["bot_account_ids"] = {"qq_official": "app"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        event = LocalEvent(
+            "/表情样本1", "qq-emote-revoked", sender="owner", platform="qq_official"
+        )
+        event.get_platform_name = lambda: "qq_official"
+        event.send = AsyncMock()
+
+        async def upload_then_revocation(event, path, permitted):
+            self.assertTrue(permitted())
+            settings["allowed_senders"]["qq_official"] = []
+            self.plugin.settings_path.write_text(json.dumps(settings))
+            self.assertFalse(permitted())
+            raise ValueError("revoked before message submission")
+
+        with patch(
+            "plugins.astrbot_plugin_companion_core.main.send_qq_image_once",
+            side_effect=upload_then_revocation,
+        ) as sender:
+            await self.plugin.handle(event)
+            sender.assert_awaited_once()
+        event.send.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -10,6 +10,7 @@ import hashlib
 import json
 import time
 import uuid
+import re
 from pathlib import Path
 
 import httpx
@@ -35,6 +36,7 @@ def main():
             "automatic",
             "safeguards",
             "discovery",
+            "emotes",
         ],
         default="memory",
     )
@@ -97,8 +99,11 @@ def main():
             },
         ).json()["data"]
         client.headers["Authorization"] = "ApiKey " + key["api_key"]
+        last_events = []
+        owned_test_images = []
 
         def send(text, user=owner, conversation=None):
+            nonlocal last_events
             response = client.post(
                 "/api/v1/chat",
                 json={
@@ -115,6 +120,7 @@ def main():
             reply = "".join(
                 str(e.get("data", "")) for e in events if e.get("type") == "plain"
             )
+            last_events = events
             if not reply or any(
                 marker in reply
                 for marker in [
@@ -177,7 +183,76 @@ def main():
             )
 
         try:
-            if args.suite == "discovery":
+            if args.suite == "emotes":
+                report["emotes"] = {
+                    "human_suitability": "not_scored",
+                    "phone_display": "not_tested",
+                    "web_images": [],
+                }
+
+                def images():
+                    return [e for e in last_events if e.get("type") == "image"]
+
+                def verify_image(expected=None):
+                    observed = images()
+                    if len(observed) != 1:
+                        raise RuntimeError("Expected exactly one Web image event")
+                    value = str(observed[0].get("data", ""))
+                    if not re.fullmatch(r"\[IMAGE\][A-Za-z0-9_-]+\.png", value):
+                        raise RuntimeError("Unexpected Web attachment identifier")
+                    path = DATA / "attachments" / value[7:]
+                    if (
+                        path.is_symlink()
+                        or path.resolve().parent != (DATA / "attachments").resolve()
+                    ):
+                        raise RuntimeError("Web attachment escaped owned root")
+                    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                    manifest = json.loads(
+                        (
+                            DATA
+                            / "plugins/astrbot_plugin_companion_core/assets/emotes/manifest.json"
+                        ).read_text(encoding="utf-8")
+                    )
+                    matches = [
+                        entry["id"]
+                        for entry in manifest["assets"]
+                        if entry["sha256"] == digest
+                    ]
+                    if len(matches) != 1 or (expected and matches[0] != expected):
+                        raise RuntimeError("Web image does not match an owned asset")
+                    report["emotes"]["web_images"].append(
+                        {
+                            "asset": matches[0],
+                            "sha256": digest,
+                            "bytes": path.stat().st_size,
+                            "transport": "real Web SSE + stored image hash",
+                        }
+                    )
+                    owned_test_images.append(path)
+
+                if "：关" not in send("/表情状态"):
+                    raise RuntimeError("Synthetic scope did not default to image-off")
+                send("/表情 开")
+                first = send("早上好，来个轻松的问候。")
+                verify_image()
+                if "[[EMOTE:" in first:
+                    raise RuntimeError("Control metadata leaked into visible text")
+                second = send("今天做成了一件小事，我挺开心！")
+                if images():
+                    raise RuntimeError("Image cooldown did not hold")
+                send("/表情样本23")
+                verify_image("E23")
+                send("以后不要发表情")
+                third = send("你好，再聊两句。")
+                if images() or "[[EMOTE:" in third:
+                    raise RuntimeError("Image off or marker stripping failed")
+                report["emotes"].update(
+                    first_reply=first,
+                    cooldown_reply=second,
+                    after_off_reply=third,
+                    real_web_checks_passed=True,
+                )
+            elif args.suite == "discovery":
                 reply = send("/B站读取 " + args.discovery_bvid)
                 state = json.loads(send("/导出记忆"))
                 activities = [
@@ -410,6 +485,8 @@ def main():
                 print("Persona scenario captured (unscored):", case["id"], flush=True)
         finally:
             try:
+                if args.suite == "emotes":
+                    send("/表情 关")
                 send("/忘记 全部")
                 send("/忘记 全部", user=other)
                 report["synthetic_active_memory_cleared"] = True
@@ -419,6 +496,12 @@ def main():
                 "/api/apikey/delete", json={"key_id": key["key_id"]}
             ).json()
             report["temporary_key_deleted"] = deletion.get("status") == "ok"
+            if args.suite == "emotes":
+                for path in owned_test_images:
+                    path.unlink(missing_ok=True)
+                report["owned_web_image_copies_removed"] = all(
+                    not p.exists() for p in owned_test_images
+                )
             output.write_text(
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
             )

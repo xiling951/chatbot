@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from local_backup import dpapi, encode, decode, memory_pair, prune, maybe_backup
+from local_backup import collect_emote_assets
 from plugins.astrbot_plugin_companion_core.memory import MemoryStore
 
 
@@ -28,6 +29,30 @@ class BackupTests(unittest.TestCase):
         tampered[-1] ^= 1
         with self.assertRaises(OSError):
             dpapi(bytes(tampered), decrypt=True)
+
+    def test_static_emote_material_included_but_other_files_and_caches_excluded(self):
+        import shutil
+
+        original = (
+            Path(__file__).resolve().parents[1]
+            / "plugins/astrbot_plugin_companion_core"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            plugin = Path(temp)
+            self.assertEqual(collect_emote_assets(plugin), {})
+            shutil.copytree(original / "assets", plugin / "assets")
+            (plugin / "assets/emotes/secret.local.json").write_text(
+                "not a real credential"
+            )
+            (plugin / "assets/emotes/cache").mkdir()
+            files = collect_emote_assets(plugin)
+            self.assertEqual(len(files), 65)
+            self.assertIn("assets/emotes/E32.png", files)
+            self.assertIn("assets/emotes/E32.svg", files)
+            self.assertFalse(any("secret" in key or "cache" in key for key in files))
+            (plugin / "assets/emotes/manifest.json").unlink()
+            with self.assertRaises(ValueError):
+                collect_emote_assets(plugin)
 
     def test_bundle_roundtrip_and_unsafe_path_rejection(self):
         original = {"config.json": b'{"test":true}', "plugin/memory.sqlite": b"test"}

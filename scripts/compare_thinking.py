@@ -36,6 +36,11 @@ def main():
     parser.add_argument(
         "--modes", choices=["both", "disabled", "enabled"], default="both"
     )
+    parser.add_argument(
+        "--emote-cases",
+        action="store_true",
+        help="Frozen 30 media scenarios; intent selection only, no IM sends",
+    )
     args = parser.parse_args()
     config = json.loads((DATA / "cmd_config.json").read_text(encoding="utf-8-sig"))
     model = next(p for p in config["provider"] if p["id"] == "companion-deepseek")
@@ -54,6 +59,9 @@ def main():
     )
     persona_bytes = persona_path.read_bytes()
     persona = yaml.safe_load(persona_bytes)
+    profile_prompt = persona["system_prompt"]
+    emote_library = None
+    emote_cases = {}
     output = PLUGIN_DATA / ("thinking-comparison-" + uuid.uuid4().hex + ".local.json")
     results = []
     prompt = "我今天有点累，不用给我解决方案，陪我说两句就好。"
@@ -74,6 +82,28 @@ def main():
                 "Select distinct development scenarios only; held-out cases are excluded"
             )
         scenarios = [available[key] for key in selected]
+    if args.emote_cases:
+        if args.persona_ids or args.modes != "disabled":
+            raise SystemExit("Use --emote-cases --modes disabled without --persona-ids")
+        from plugins.astrbot_plugin_companion_core.emotes import EmoteLibrary
+
+        emote_library = EmoteLibrary(
+            Path(__file__).resolve().parents[1]
+            / "plugins/astrbot_plugin_companion_core/assets/emotes"
+        )
+        profile_prompt += emote_library.instruction()
+        emote_cases = {
+            c["id"]: c
+            for c in json.loads(
+                (
+                    Path(__file__).resolve().parents[1] / "tests/media_cases.json"
+                ).read_text(encoding="utf-8")
+            )["emote_cases"]
+        }
+        scenarios = [
+            {"id": c["id"], "turns": c["history"] + [c["prompt"]]}
+            for c in emote_cases.values()
+        ]
     cases = []
     for index, scenario in enumerate(scenarios):
         modes = ("disabled", "enabled") if index % 2 == 0 else ("enabled", "disabled")
@@ -104,9 +134,7 @@ def main():
                 allowance_path,
                 len(
                     (
-                        persona["system_prompt"]
-                        + text
-                        + "".join(m["content"] for m in history)
+                        profile_prompt + text + "".join(m["content"] for m in history)
                     ).encode("utf-8")
                 ),
             )
@@ -122,7 +150,7 @@ def main():
                 response = client.chat.completions.create(
                     model="deepseek-flash",
                     messages=[
-                        {"role": "system", "content": persona["system_prompt"]},
+                        {"role": "system", "content": profile_prompt},
                         *history,
                         {"role": "user", "content": text},
                     ],
@@ -161,6 +189,40 @@ def main():
                         else None
                     ),
                 )
+                if emote_library:
+                    from plugins.astrbot_plugin_companion_core.emotes import (
+                        extract_intent,
+                    )
+                    from plugins.astrbot_plugin_companion_core.reply_guard import (
+                        guard_reply,
+                    )
+
+                    clean, intent = extract_intent(result["reply"])
+                    clean, guard = guard_reply(clean, text, history)
+                    selected_asset = (
+                        None
+                        if guard
+                        else emote_library.choose(intent, text, clean, history)
+                    )
+                    expected = emote_cases[case_id]
+                    final_turn = text == expected["prompt"]
+                    result.update(
+                        emote_intent=intent,
+                        emote_asset=selected_asset,
+                        clean_reply=clean,
+                        serious=expected["serious"],
+                        final_case_turn=final_turn,
+                        human_score=None,
+                        automatic_intent_check_passed=(
+                            selected_asset is None
+                            if expected["serious"]
+                            else bool(
+                                selected_asset and intent in expected["allowed_intents"]
+                            )
+                        )
+                        if final_turn
+                        else None,
+                    )
                 history.extend(
                     [
                         {"role": "user", "content": text},
@@ -194,6 +256,28 @@ def main():
                     {
                         "cases": results,
                         "persona_sha256": hashlib.sha256(persona_bytes).hexdigest(),
+                        "actual_system_prompt_sha256": hashlib.sha256(
+                            profile_prompt.encode()
+                        ).hexdigest(),
+                        "emote_manifest_sha256": hashlib.sha256(
+                            (emote_library.folder / "manifest.json").read_bytes()
+                        ).hexdigest()
+                        if emote_library
+                        else None,
+                        "emote_preliminary_check": {
+                            "completed_scenarios": sum(
+                                r.get("final_case_turn", False) for r in results
+                            ),
+                            "matching_intents_or_serious_abstentions": sum(
+                                r.get("automatic_intent_check_passed") is True
+                                for r in results
+                            ),
+                            "required_matching": 24,
+                            "human_suitability": "not_scored",
+                            "device_display": "not_tested",
+                        }
+                        if emote_library
+                        else None,
                         "profile_source": "candidate file"
                         if args.persona_file
                         else "deployed file",

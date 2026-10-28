@@ -14,6 +14,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .binding import BindingStore, LEDGER_SCHEMA
+from .emotes import EmoteStore, LEDGER_SCHEMA as EMOTE_LEDGER_SCHEMA
 
 
 def now() -> str:
@@ -59,7 +60,9 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS ledger.discovery_days(day TEXT PRIMARY KEY, scope TEXT NOT NULL, source TEXT NOT NULL, state TEXT NOT NULL, result TEXT NOT NULL, at TEXT NOT NULL);
         """)
         self.db.executescript(LEDGER_SCHEMA)
+        self.db.executescript(EMOTE_LEDGER_SCHEMA)
         self.binding = BindingStore(self)
+        self.emotes = EmoteStore(self)
         row = self.db.execute("SELECT id FROM ledger.meta").fetchone()
         ledger_id = row[0] if row else uuid.uuid4().hex
         old = self.db.execute("SELECT value FROM meta WHERE key='ledger_id'").fetchone()

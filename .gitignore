@@ -11,3 +11,4 @@ reports/*_results.local.json
 *.local.*
 data/
 *.tmp
+node_modules/

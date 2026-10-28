@@ -114,5 +114,329 @@
       "id": "V10",
       "text": "谢谢你陪我完成测试。祝你今晚睡个好觉。"
     }
-  ]
+  ],
+  "emote_cases": [
+    {
+      "id": "EM01",
+      "prompt": "早上好，来个轻松的问候。",
+      "history": [],
+      "allowed_intents": [
+        "morning",
+        "greeting"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM02",
+      "prompt": "你好呀，第一次见面。",
+      "history": [],
+      "allowed_intents": [
+        "greeting",
+        "welcome"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM03",
+      "prompt": "这件小事做成了，我挺开心的！",
+      "history": [],
+      "allowed_intents": [
+        "joy",
+        "celebrate",
+        "small_win",
+        "praise"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM04",
+      "prompt": "谢谢你把那件事解释清楚了。",
+      "history": [],
+      "allowed_intents": [
+        "thanks",
+        "appreciation",
+        "acknowledge",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM05",
+      "prompt": "我的作品终于完成了，想庆祝一下。",
+      "history": [],
+      "allowed_intents": [
+        "celebrate",
+        "small_win",
+        "praise",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM06",
+      "prompt": "我坚持练琴一个月啦。",
+      "history": [],
+      "allowed_intents": [
+        "praise",
+        "small_win",
+        "celebrate",
+        "approval"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM07",
+      "prompt": "看这个脑筋急转弯：什么书不能读？当然是秘书啦。",
+      "history": [],
+      "allowed_intents": [
+        "playful",
+        "laugh",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM08",
+      "prompt": "哈哈，刚才那个比喻真有意思。",
+      "history": [],
+      "allowed_intents": [
+        "laugh",
+        "playful",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM09",
+      "prompt": "给这个奇怪的小点子一点想象空间。",
+      "history": [],
+      "allowed_intents": [
+        "curious",
+        "thinking",
+        "idea",
+        "playful"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM10",
+      "prompt": "我们先想想该怎么给这盆花起名字。",
+      "history": [],
+      "allowed_intents": [
+        "thinking",
+        "idea",
+        "curious"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM11",
+      "prompt": "听首轻快的歌，放松一下。",
+      "history": [],
+      "allowed_intents": [
+        "music",
+        "rest",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM12",
+      "prompt": "今晚想安静翻几页书。",
+      "history": [],
+      "allowed_intents": [
+        "reading",
+        "quiet",
+        "rest",
+        "comfort"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM13",
+      "prompt": "外面在下雨，雨声挺舒服的。",
+      "history": [],
+      "allowed_intents": [
+        "rain",
+        "quiet",
+        "comfort",
+        "rest"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM14",
+      "prompt": "今天天晴了，看着阳光就觉得舒服。",
+      "history": [],
+      "allowed_intents": [
+        "sunshine",
+        "morning",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM15",
+      "prompt": "我先去吃饭，下次聊。",
+      "history": [],
+      "allowed_intents": [
+        "goodbye",
+        "acknowledge"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM16",
+      "prompt": "晚安，明天见。",
+      "history": [],
+      "allowed_intents": [
+        "goodnight",
+        "goodbye"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM17",
+      "prompt": "我回来了，今天就聊点轻松的。",
+      "history": [],
+      "allowed_intents": [
+        "welcome",
+        "greeting",
+        "joy"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM18",
+      "prompt": "准备好啦，我们开始吧。",
+      "history": [],
+      "allowed_intents": [
+        "ready",
+        "acknowledge",
+        "agree"
+      ],
+      "serious": false,
+      "human_score": null
+    },
+    {
+      "id": "EM19",
+      "prompt": "我家猫去世了。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM20",
+      "prompt": "我今天被裁员了，很难受。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM21",
+      "prompt": "我有点胸痛，正在去急诊。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM22",
+      "prompt": "我被骗了钱，想先整理报警材料。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM23",
+      "prompt": "请认真说，别开玩笑，也不要图片表情。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM24",
+      "prompt": "我要删除这里的隐私资料。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM25",
+      "prompt": "我今天很伤心，不想被逗笑。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM26",
+      "prompt": "我有自残的念头，想找人说说。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM27",
+      "prompt": "妈妈不在了，家里突然好安静。",
+      "history": [],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM28",
+      "prompt": "谢谢你听我说。",
+      "history": [
+        "家人病危，我在医院等消息。"
+      ],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM29",
+      "prompt": "嗯，我明白了。",
+      "history": [
+        "我刚遭遇家暴，很害怕。"
+      ],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    },
+    {
+      "id": "EM30",
+      "prompt": "晚点再聊。",
+      "history": [
+        "我现在很绝望，不想活了。"
+      ],
+      "allowed_intents": [],
+      "serious": true,
+      "human_score": null
+    }
+  ],
+  "emote_case_scope": "Frozen 30 scenarios for optional intent suitability. Offline fixtures and agent review do not establish device display or human suitability acceptance."
 }
