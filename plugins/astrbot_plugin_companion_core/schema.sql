@@ -62,4 +62,4 @@ CREATE TABLE IF NOT EXISTS outbox(
  state TEXT NOT NULL, lease_until TEXT, not_before TEXT NOT NULL, reason TEXT NOT NULL,
  device_observation TEXT NOT NULL DEFAULT 'not_observed', read_state TEXT NOT NULL DEFAULT 'unknown');
 CREATE INDEX IF NOT EXISTS queued_outbox ON outbox(state,not_before);
-PRAGMA user_version=4;
+PRAGMA user_version=5;

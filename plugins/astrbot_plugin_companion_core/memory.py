@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .binding import BindingStore, LEDGER_SCHEMA
+
 
 def now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -37,7 +39,7 @@ class MemoryStore:
             raise RuntimeError("Latest deletion ledger missing; recovery refused")
         self.db = sqlite3.connect(self.path, timeout=10)
         self.db.row_factory = sqlite3.Row
-        if self.db.execute("PRAGMA user_version").fetchone()[0] > 4:
+        if self.db.execute("PRAGMA user_version").fetchone()[0] > 5:
             self.db.close()
             raise RuntimeError("Unsupported newer database schema; do not downgrade")
         self.db.executescript(Path(__file__).with_name("schema.sql").read_text())
@@ -54,6 +56,8 @@ class MemoryStore:
             CREATE TABLE IF NOT EXISTS ledger.proactive(scope TEXT PRIMARY KEY, revision INTEGER NOT NULL, enabled INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS ledger.submissions(idempotency_key TEXT PRIMARY KEY, scope TEXT NOT NULL, state TEXT NOT NULL, local_day TEXT NOT NULL, submitted_at TEXT NOT NULL, attempts INTEGER NOT NULL, retry_at TEXT);
         """)
+        self.db.executescript(LEDGER_SCHEMA)
+        self.binding = BindingStore(self)
         row = self.db.execute("SELECT id FROM ledger.meta").fetchone()
         ledger_id = row[0] if row else uuid.uuid4().hex
         old = self.db.execute("SELECT value FROM meta WHERE key='ledger_id'").fetchone()
@@ -210,6 +214,12 @@ class MemoryStore:
             raise ValueError("Conflicting fact; use /更正 属性=值 explicitly")
         if old:
             self._purge(ticket.scope, predicate)
+        elif any(
+            predicate in json.loads(link["predicates"])
+            for link in self.binding.links(ticket.scope)
+        ):
+            # A new local fact may shadow a previously shared value in history.
+            self._invalidate_pending(ticket.scope)
         fact_id = uuid.uuid4().hex
         self.db.execute(
             "INSERT INTO facts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -329,7 +339,14 @@ class MemoryStore:
                 ticket, row["predicate"], row["value"], correction=True
             )
 
-    def _invalidate_pending(self, scope: str):
+    def _invalidate_pending(self, scope: str, _visited=None):
+        visited = set() if _visited is None else _visited
+        if scope in visited:
+            return
+        visited.add(scope)
+        for link in self.binding.links(scope):
+            peer = link["scope_b"] if scope == link["scope_a"] else link["scope_a"]
+            self._invalidate_pending(peer, visited)
         rows = self.db.execute(
             "SELECT id,source FROM candidates WHERE scope=?", (scope,)
         ).fetchall()
@@ -463,6 +480,7 @@ class MemoryStore:
     def forget(self, scope: str, predicate: str | None = None):
         with self.db:
             self._purge(scope, predicate)
+            self.binding.forget(scope, predicate)
 
     def set_enabled(self, scope: str, enabled: bool):
         with self.db:
@@ -474,6 +492,8 @@ class MemoryStore:
                 (scope, int(enabled)),
             )
             self._invalidate_pending(scope)
+            if not enabled:
+                self.binding.forget(scope)
 
     def history(self, scope: str, conversation: str, budget=4000) -> list[dict]:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
@@ -539,7 +559,7 @@ class MemoryStore:
             )
         ]
 
-    def recall(self, scope: str, query: str, budget=1200) -> list[dict]:
+    def recall(self, scope: str, query: str, budget=1200, *, shared=()) -> list[dict]:
         if not self.db.execute(
             "SELECT enabled FROM scopes WHERE scope=?", (scope,)
         ).fetchone()[0]:
@@ -560,7 +580,7 @@ class MemoryStore:
             if key in query or any(w in query for w in words)
         }
         ranked = []
-        for fact in self.facts(scope):
+        for fact in [*self.facts(scope), *shared]:
             text = fact["predicate"] + fact["value"]
             # Structured keys and mapped topics must outrank incidental word
             # overlap, especially when the byte budget fits only two facts.

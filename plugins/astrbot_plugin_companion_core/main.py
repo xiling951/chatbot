@@ -36,9 +36,10 @@ from .emotion import EmotionState
 from .voice_probe import VoiceProbe
 from .cloud_tts import generate as generate_speech, OWNED_AUDIO
 from .owner_pairing import claim_owner
+from .binding import Endpoint, handle_binding_command
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.4.4")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.5.0")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -86,6 +87,26 @@ class CompanionCore(Star):
             )
         except (OSError, ValueError):
             return False
+
+    def _binding_endpoints(self, settings):
+        endpoints = []
+        manager = getattr(self.context, "platform_manager", None)
+        for adapter in getattr(manager, "platform_insts", []):
+            meta = adapter.meta()
+            channel = {"weixin_oc": "微信", "qq_official": "QQ"}.get(meta.name)
+            account = settings.get("bot_account_ids", {}).get(meta.id)
+            owners = settings.get("allowed_senders", {}).get(meta.id, [])
+            if not channel or not account or len(owners) != 1:
+                continue
+            if (
+                meta.name == "qq_official"
+                and str(getattr(adapter, "appid", "")) != account
+            ):
+                continue
+            endpoints.append(
+                Endpoint(meta.id, f"{meta.id}:{account}", owners[0], channel)
+            )
+        return endpoints
 
     def _proactive_capable(self, row) -> bool:
         try:
@@ -201,6 +222,8 @@ class CompanionCore(Star):
             scope = self.store.scope(
                 platform, bot, sender, visibility, self.persona["id"]
             )
+            binding_endpoints = self._binding_endpoints(settings)
+            self.store.binding.reconcile(binding_endpoints)
             self.delivery.record_response(scope, datetime.now(timezone.utc))
             pending_tasks_before = {
                 r[0]
@@ -215,19 +238,27 @@ class CompanionCore(Star):
                 getattr(event.message_obj, "message_str", "") or event.get_message_str()
             ).strip()
             # Chinese command names are commonly entered directly beside a digit.
-            if match := re.fullmatch(r"/语音样本\s*(\d{1,2})", text):
-                text = "/语音样本 " + match[1]
+            if match := re.fullmatch(r"/(语音(?:气泡)?样本)\s*(\d{1,2})", text):
+                text = "/" + match[1] + " " + match[2]
             notice = ""
             try:
                 components = event.get_messages() or []
                 if text == "/语音帮助":
                     await event.send(
                         event.plain_result(
-                            "/朗读 内容：将你明确提供的这段文字送至微软 Edge 在线语音服务，使用现成音色生成音频文件，不克隆声音，不调用聊天模型或写入记忆。最多约200个汉字，本机缓存24小时。\n/语音样本 1 至 10：取已生成的公开测试音频。微信此时按音频文件发送，不是原生语音气泡；是否收到及能播放需你确认。"
+                            "/朗读 内容：将你明确提供的这段文字送至微软 Edge 在线语音服务，使用现成音色生成音频文件，不克隆声音，不调用聊天模型或写入记忆。最多约200个汉字，本机缓存24小时。\n/语音样本 1 至 10：取已生成的公开测试音频，按音频文件发送。\n/语音气泡样本1 至 10：仅本人QQ单聊发送原生语音样本。微信原生气泡尚未通过，音频文件不算气泡；实际收到和播放需设备验证。"
                         )
                     )
                     return
-                if text.startswith(("/朗读 ", "/语音样本 ")):
+                if text.startswith(("/朗读 ", "/语音样本 ", "/语音气泡样本 ")):
+                    native_qq = text.startswith("/语音气泡样本 ")
+                    if native_qq and event.get_platform_name() != "qq_official":
+                        await event.send(
+                            event.plain_result(
+                                "原生语音样本当前只在已核实的本人QQ单聊测试。微信原生气泡实测未显示，不重复发送同一路径。"
+                            )
+                        )
+                        return
                     if (self.home / "STOP").exists():
                         await event.send(
                             event.plain_result(
@@ -286,16 +317,21 @@ class CompanionCore(Star):
                         )
                     ):
                         raise ValueError("本机停止或授权已变化，本次不发送语音文件。")
-                    await event.send(
-                        event.chain_result(
-                            [
-                                Plain(
-                                    "云端语音文件测试，请检查附件能否播放；这不是原生语音气泡。"
-                                ),
-                                File(name="小澄语音测试.mp3", file=str(audio)),
-                            ]
+                    if native_qq:
+                        # Pinned QQ adapter converts Record to Tencent SILK and
+                        # uses its voice upload. No File fallback is substituted.
+                        await event.send(event.chain_result([Record(file=str(audio))]))
+                    else:
+                        await event.send(
+                            event.chain_result(
+                                [
+                                    Plain(
+                                        "云端语音文件测试，请检查附件能否播放；这不是原生语音气泡。"
+                                    ),
+                                    File(name="小澄语音测试.mp3", file=str(audio)),
+                                ]
+                            )
                         )
-                    )
                     return
                 if text == "/语音气泡测试":
                     if settings.get("native_voice_probe_disabled_after_failure"):
@@ -421,7 +457,17 @@ class CompanionCore(Star):
                     private=not bool(event.get_group_id()),
                     defaults=self.messaging_defaults,
                 )
-                if reminder_reply is not None:
+                binding_reply = handle_binding_command(
+                    text,
+                    self.store.binding,
+                    scope,
+                    binding_endpoints,
+                    datetime.now(timezone.utc),
+                    stopped=(self.home / "STOP").exists(),
+                )
+                if binding_reply is not None:
+                    reply = binding_reply
+                elif reminder_reply is not None:
                     reply = reminder_reply
                 elif text.startswith(("/记住 ", "/更正 ")):
                     command, content = text.split(" ", 1)
@@ -453,6 +499,12 @@ class CompanionCore(Star):
                             "events": self.store.events(scope),
                             "relationship": self.store.relationship(scope),
                             "automatic": self.store.automatic_enabled(scope),
+                            "bindings": [
+                                dict(r) for r in self.store.binding.links(scope)
+                            ],
+                            "shared_facts": self.store.binding.shared_facts(
+                                scope, binding_endpoints
+                            ),
                             "simulated_style_state": self.emotion.read(
                                 scope, datetime.now(timezone.utc)
                             ),
@@ -526,7 +578,7 @@ class CompanionCore(Star):
                                 await db_helper.delete_platform_message_history_by_id(
                                     row.id
                                 )
-                    reply = "已删除匹配的本地记忆并清理当前会话历史。其他会话显示记录、旧备份及模型服务数据不在此次清理范围内；旧备份恢复必须携带最新删除账本。"
+                    reply = "已删除匹配的本地记忆并清理当前会话历史；若该属性在跨端共享中，也已撤回该属性的共享并清理两端活跃上下文，另一端原始事实保留。其他会话显示记录、旧备份及模型服务数据不在此次清理范围内；旧备份恢复必须携带最新删除账本。"
                 elif text in ("/停止记忆", "/恢复记忆"):
                     enabled = text == "/恢复记忆"
                     self.store.set_enabled(scope, enabled)
@@ -537,6 +589,7 @@ class CompanionCore(Star):
                     )
                 elif text in ("/帮助", "/记忆帮助"):
                     reply = "可以说：记住，我喜欢听爵士；更正，我喜欢听摇滚；忘记我的音乐偏好。\n/记住 属性=值\n/更正 属性=值\n/记忆\n/忘记 属性 或 /忘记 全部\n/停止记忆\n/恢复记忆\n/导出记忆\n/自动记忆 开 或 /自动记忆 关（默认关闭）\n/待确认记忆\n/确认记忆 编号\n/记录事件 内容\n/记录计划 内容（不安排提醒）\n/共同事件\n/忘记 共同事件\n自动记忆只从当前本人明确陈述中提取；假设、引用和角色扮演不保存。"
+                    reply += "\n/绑定帮助：查看本人微信/QQ指定属性共享与解绑步骤（默认不共享）。"
                 elif text.startswith("/"):
                     reply = (
                         "当前测试入口由 Companion Core 接管；使用 /记忆帮助 查看命令。"
@@ -565,7 +618,13 @@ class CompanionCore(Star):
                             if state == "pending"
                             else f"\n〔已记住：{statement.predicate}={statement.value}〕"
                         )
-                    facts = self.store.recall(scope, text)
+                    facts = self.store.recall(
+                        scope,
+                        text,
+                        shared=self.store.binding.shared_facts(
+                            scope, binding_endpoints
+                        ),
+                    )
                     if self.store.db.execute(
                         "SELECT enabled FROM scopes WHERE scope=?", (scope,)
                     ).fetchone()[0]:
@@ -585,6 +644,10 @@ class CompanionCore(Star):
                         }
                         for f in facts
                     ]
+                    for item, fact in zip(memory_items, facts):
+                        if "shared_from" in fact:
+                            item["shared_from"] = fact["shared_from"]
+                            item["binding_id"] = fact["binding_id"]
                     if (
                         any(w in text for w in ("计划", "事件", "约定", "一起"))
                         and self.store.db.execute(

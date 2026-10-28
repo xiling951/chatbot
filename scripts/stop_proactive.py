@@ -16,7 +16,7 @@ def revoke_pending(database: Path, ledger: Path) -> tuple[int, int]:
         version = db.execute("PRAGMA user_version").fetchone()[0]
         if version < 4:
             return 0, 0
-        if version != 4 or not ledger.exists():
+        if version not in (4, 5) or not ledger.exists():
             raise RuntimeError("Compatible schema and latest proactive ledger required")
         db.execute("ATTACH DATABASE ? AS ledger", (str(ledger),))
         db.executescript(

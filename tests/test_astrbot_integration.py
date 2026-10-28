@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 import tempfile
 import unittest
 from datetime import datetime
@@ -583,6 +584,34 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             )
         self.plugin.context.llm_generate.assert_not_awaited()
 
+    async def test_native_sample_only_verified_qq_record_never_file(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"]["qq_official"] = ["owner"]
+        settings["bot_account_ids"] = {"qq_official": "trusted-app"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        folder = self.plugin.home / "tts-cache"
+        folder.mkdir()
+        audio = folder / ("tts-" + "b" * 32 + ".mp3")
+        audio.write_bytes(b"test transport only")
+        (self.plugin.home / "tts-samples.local.json").write_text(
+            json.dumps({"V01": audio.name})
+        )
+        web = LocalEvent("/语音气泡样本1", "web-native-refused")
+        await self.plugin.handle(web)
+        self.assertIn("只在已核实的本人QQ", web.sent[0])
+        event = LocalEvent(
+            "/语音气泡样本1", "qq-native", sender="owner", platform="qq_official"
+        )
+        event.send = AsyncMock()
+        await self.plugin.handle(event)
+        await self.plugin.handle(event)
+        event.send.assert_awaited_once()
+        chain = event.send.call_args.args[0].chain
+        self.assertEqual(len(chain), 1)
+        self.assertIsInstance(chain[0], Record)
+        self.assertNotIsInstance(chain[0], File)
+        self.plugin.context.llm_generate.assert_not_awaited()
+
     async def test_qq_unknown_selfid_requires_trusted_appid_and_isolates_accounts(self):
         settings = json.loads(self.plugin.settings_path.read_text())
         settings["allowed_senders"]["qq_official"] = ["owner"]
@@ -708,6 +737,107 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         await self.plugin.handle(event)
         self.assertEqual(event.sent, ["假提供商回复"])
         self.assertEqual(json.loads(path.read_text())["attempts_used"], 101)
+
+    async def test_binding_two_mobile_commands_model_scope_and_unlink(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"].update(
+            {"weixin_oc": ["wx-owner"], "qq_official": ["qq-owner"]}
+        )
+        settings["bot_account_ids"] = {
+            "weixin_oc": "wx-account",
+            "qq_official": "qq-app",
+        }
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        self.plugin.context.platform_manager = SimpleNamespace(
+            platform_insts=[
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="weixin_oc", name="weixin_oc")
+                ),
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="qq_official", name="qq_official"),
+                    appid="qq-app",
+                ),
+            ]
+        )
+
+        async def send(text, index, qq=False):
+            platform, owner = (
+                ("qq_official", "qq-owner") if qq else ("weixin_oc", "wx-owner")
+            )
+            event = LocalEvent(
+                text, "binding-" + str(index), sender=owner, platform=platform
+            )
+            await self.plugin.handle(event)
+            return event
+
+        await send("/记住 音乐=爵士", 1)
+        await send("/记住 生日=六月一日", 2)
+        issued = await send("/绑定发起 QQ 音乐", 3)
+        code = re.search(r"绑定码 ([0-9A-F]{24})", issued.sent[0])[1]
+        premature = await send("/绑定接受 " + code, 4, qq=True)
+        self.assertIn("请先用 /绑定查看", premature.sent[0])
+        await send("/绑定查看 " + code, 5, qq=True)
+        accepted = await send("/绑定接受 " + code, 6, qq=True)
+        self.assertIn("已确认", accepted.sent[0])
+        self.plugin.context.llm_generate.assert_not_awaited()
+        await send("我听什么音乐，生日呢", 7, qq=True)
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertIn("爵士", request["system_prompt"])
+        self.assertIn('"shared_from": "微信"', request["system_prompt"])
+        self.assertNotIn("六月一日", request["system_prompt"])
+        status = await send("/绑定状态", 8, qq=True)
+        identifier = status.sent[0].split()[0]
+        await send("/解绑 " + identifier, 9)
+        await send("我的音乐是什么", 10, qq=True)
+        request = self.plugin.context.llm_generate.call_args.kwargs
+        self.assertNotIn("爵士", request["system_prompt"])
+        self.assertEqual(request["contexts"], [])
+
+    async def test_binding_refuses_web_groups_and_mismatched_actual_qq_app(self):
+        web = LocalEvent("/绑定发起 QQ 音乐", "web-binding")
+        await self.plugin.handle(web)
+        self.assertIn("仅限", web.sent[0])
+        self.assertEqual(
+            self.plugin.store.db.execute(
+                "SELECT count(*) FROM ledger.binding_codes"
+            ).fetchone()[0],
+            0,
+        )
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["allowed_senders"].update(
+            {"weixin_oc": ["owner"], "qq_official": ["owner"]}
+        )
+        settings["bot_account_ids"] = {"weixin_oc": "wx", "qq_official": "expected"}
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        self.plugin.context.platform_manager = SimpleNamespace(
+            platform_insts=[
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="weixin_oc", name="weixin_oc")
+                ),
+                SimpleNamespace(
+                    meta=lambda: SimpleNamespace(id="qq_official", name="qq_official"),
+                    appid="wrong",
+                ),
+            ]
+        )
+        event = LocalEvent(
+            "/绑定发起 QQ 音乐",
+            "wrong-app-binding",
+            sender="owner",
+            platform="weixin_oc",
+        )
+        await self.plugin.handle(event)
+        self.assertIn("目标渠道必须", event.sent[0])
+        group = LocalEvent(
+            "/绑定帮助",
+            "group-binding",
+            sender="owner",
+            platform="weixin_oc",
+            group="g",
+        )
+        await self.plugin.handle(group)
+        self.assertEqual(group.sent, [])
+        self.plugin.context.llm_generate.assert_not_awaited()
 
 
 if __name__ == "__main__":

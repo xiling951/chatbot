@@ -177,7 +177,7 @@ class LifecycleTests(unittest.TestCase):
         self.store = MemoryStore(
             self.root / "memory.sqlite", self.root / "latest.sqlite"
         )
-        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 4)
+        self.assertEqual(self.store.db.execute("PRAGMA user_version").fetchone()[0], 5)
         self.assertEqual(self.store.facts(self.scope)[0]["value"], "爵士")
         self.assertFalse(self.store.automatic_enabled(self.scope))
         self.assertEqual(
