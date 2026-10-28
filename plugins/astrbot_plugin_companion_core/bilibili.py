@@ -23,6 +23,29 @@ class ReadFailed(ValueError):
     """A bounded failure category, without raw response or request secrets."""
 
 
+def loopback_proxy(value: str) -> str:
+    """Only operator configuration can select this local CONNECT gateway."""
+    try:
+        url = urlsplit(value)
+        if (
+            not isinstance(value, str)
+            or any(c.isspace() for c in value)
+            or url.scheme != "http"
+            or url.hostname not in ("127.0.0.1", "::1")
+            or url.username is not None
+            or url.password is not None
+            or url.path not in ("", "/")
+            or url.query
+            or url.fragment
+            or not url.port
+            or not 1 <= url.port <= 65535
+        ):
+            raise ValueError()
+    except (ValueError, TypeError, AttributeError):
+        raise ReadFailed("invalid_loopback_proxy") from None
+    return value.rstrip("/")
+
+
 def video_id(value: str) -> str:
     value = value.strip()
     if VIDEO.fullmatch(value):
@@ -76,17 +99,26 @@ class VideoMetadata:
 
 
 class BilibiliReader:
-    def __init__(self, *, transport=None, origin_check=public_origin):
+    def __init__(self, *, transport=None, origin_check=public_origin, proxy=None):
         self.transport, self.origin_check = transport, origin_check
+        self.proxy = loopback_proxy(proxy) if proxy is not None else None
 
     async def read(self, value: str) -> VideoMetadata:
         bvid = video_id(value)
         try:
             # Only a fixed public API origin is ever contacted. Response URLs,
             # redirects and fields cannot cause any further network operation.
-            await self.origin_check()
+            if self.proxy is None:
+                await self.origin_check()
+            # Explicit local CONNECT routing resolves the fixed remote origin at
+            # the gateway. Local fake-IP DNS is not a remote address in this mode.
+            # TLS still verifies api.bilibili.com end-to-end; no arbitrary host,
+            # redirect, response URL, cookie or environment proxy is accepted.
             async with httpx.AsyncClient(
-                transport=self.transport or httpx.AsyncHTTPTransport(retries=0),
+                transport=self.transport
+                or httpx.AsyncHTTPTransport(
+                    retries=0, proxy=self.proxy, verify=True, trust_env=False
+                ),
                 timeout=httpx.Timeout(10, connect=5),
                 follow_redirects=False,
                 trust_env=False,

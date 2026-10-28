@@ -20,6 +20,7 @@ from plugins.astrbot_plugin_companion_core.bilibili import (
     public_origin,
     read_bounded,
     video_id,
+    loopback_proxy,
 )
 from plugins.astrbot_plugin_companion_core.memory import MemoryStore
 
@@ -50,6 +51,51 @@ def payload():
 
 
 class ReaderTests(unittest.IsolatedAsyncioTestCase):
+    async def test_explicit_loopback_connect_uses_verified_fixed_origin_and_no_local_dns(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json=payload())
+        origin = AsyncMock(side_effect=AssertionError("local DNS not remote resolution"))
+        with patch(
+            "plugins.astrbot_plugin_companion_core.bilibili.httpx.AsyncHTTPTransport",
+            return_value=httpx.MockTransport(handler),
+        ) as factory:
+            value = await read_bounded(
+                BilibiliReader(proxy="http://127.0.0.1:58301/", origin_check=origin), BV
+            )
+        factory.assert_called_once_with(
+            retries=0, proxy="http://127.0.0.1:58301", verify=True, trust_env=False
+        )
+        origin.assert_not_awaited()
+        self.assertEqual(value.bvid, BV)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(str(calls[0].url), "https://api.bilibili.com/x/web-interface/view?bvid=" + BV)
+        self.assertNotIn("cookie", calls[0].headers)
+        self.assertNotIn("authorization", calls[0].headers)
+
+    async def test_proxy_configuration_never_accepts_remote_auth_pac_or_ambiguous_routes(self):
+        for value in (
+            "windows", "", "http://localhost:7890", "http://example.com:7890",
+            "https://127.0.0.1:7890", "http://127.0.0.1", "http://127.0.0.1:0",
+            "http://127.0.0.1:65536", "http://127.0.0.1:bad",
+            "http://user:secret@127.0.0.1:7890", "http://@127.0.0.1:7890",
+            "http://127.0.0.1:7890/pac",
+            "http://127.0.0.1:7890?x=1", "http://127.0.0.1:7890#x",
+            " http://127.0.0.1:7890", None, 42,
+        ):
+            with self.subTest(value=value), self.assertRaises(ReadFailed):
+                loopback_proxy(value)
+        self.assertEqual(loopback_proxy("http://[::1]:58301"), "http://[::1]:58301")
+
+    async def test_direct_mode_private_dns_still_prevents_any_http_request(self):
+        origin = AsyncMock(side_effect=ReadFailed("public_dns_required"))
+        with patch(
+            "plugins.astrbot_plugin_companion_core.bilibili.httpx.AsyncHTTPTransport"
+        ) as factory, self.assertRaisesRegex(ReadFailed, "public_dns_required"):
+            await read_bounded(BilibiliReader(origin_check=origin), BV)
+        factory.assert_not_called()
+
     async def read(self, response):
         self.calls = []
 

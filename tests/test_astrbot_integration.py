@@ -861,14 +861,18 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             description=metadata.description.encode()[:900].decode(errors="ignore"),
         )
         reader = SimpleNamespace(read=AsyncMock(return_value=metadata))
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["bilibili_loopback_proxy"] = "http://127.0.0.1:58301"
+        self.plugin.settings_path.write_text(json.dumps(settings))
         with patch(
             "plugins.astrbot_plugin_companion_core.main.BilibiliReader",
             return_value=reader,
-        ):
+        ) as factory:
             event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-read")
             await self.plugin.handle(event)
             self.assertIn("未观看视频", event.sent[0])
             self.assertEqual(reader.read.await_count, 1)
+            factory.assert_called_once_with(proxy="http://127.0.0.1:58301")
             self.plugin.context.llm_generate.assert_not_awaited()
             duplicate = LocalEvent("/B站读取 BV1xx411c7mD", "bili-again")
             await self.plugin.handle(duplicate)
@@ -887,6 +891,17 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             self.plugin.store.db.execute("SELECT count(*) FROM tasks").fetchone()[0], 0
         )
+
+    async def test_bilibili_invalid_proxy_does_not_leak_config_or_create_activity(self):
+        settings = json.loads(self.plugin.settings_path.read_text())
+        settings["bilibili_loopback_proxy"] = "http://operator-secret@127.0.0.1:7890"
+        self.plugin.settings_path.write_text(json.dumps(settings))
+        event = LocalEvent("/B站读取 BV1xx411c7mD", "bili-invalid-proxy")
+        await self.plugin.handle(event)
+        self.assertIn("invalid_loopback_proxy", event.sent[0])
+        self.assertNotIn("operator-secret", event.sent[0])
+        self.assertEqual(self.plugin.store.db.execute("SELECT count(*) FROM events").fetchone()[0], 0)
+        self.plugin.context.llm_generate.assert_not_awaited()
 
     async def test_bilibili_failure_stop_and_disabled_memory_do_not_invent_activity(
         self,

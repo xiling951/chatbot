@@ -46,7 +46,7 @@ from .emotes import (
 )
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.0")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.1")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -338,7 +338,10 @@ class CompanionCore(Star):
                         ticket, datetime.now(timezone.utc)
                     )
                     try:
-                        metadata = await read_bounded(BilibiliReader(), identifier)
+                        metadata = await read_bounded(
+                            BilibiliReader(proxy=settings.get("bilibili_loopback_proxy")),
+                            identifier,
+                        )
                     except ReadFailed as exc:
                         self.store.finish_discovery(ticket, day, error=str(exc))
                         reply = f"本次未取得B站资料（{exc}），没有记录成功活动，也没有自动重试。"
