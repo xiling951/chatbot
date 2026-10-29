@@ -25,3 +25,5 @@ compare_thinking.py 与插件共享计数锁，可在服务运行时测试，逐
 官方部署与接口：[源码部署](https://docs.astrbot.app/deploy/astrbot/cli.html)、[官方仓库固定版本](https://github.com/AstrBotDevs/AstrBot/tree/v4.29.3)。
 
 启动现经scripts/runtime_bootstrap.py进入同一固定AstrBot主程序；QQ专用代理兼容和逐入口守护见deployment.md。私有qq_loopback_proxy指向已有本机代理，不修改系统线路。独立诊断check_qq_transport.py仅检查令牌/身份/网关Hello，不发送IM或鉴权为第二在线实例；预检失败必须保留，不以命令退出码0代替内容成功。运维启动/恢复脚本现也进入受控加密快照，整体260项检查通过。
+
+人格候选可用scripts/evaluate_persona.py在隔离合成事件中调用真实模型，使用实际插件提示/历史/回复检查，不接手机或替换线上人格；共享线上调用计数和停止开关。fresh-heldout显式选择新保留题，当前未消耗。evaluate_memory.py同名选择仍是实际Web路径，两种证据不混用。用户当前要求测试暂缓，恢复后再运行这些入口。

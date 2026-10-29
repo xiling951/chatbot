@@ -46,7 +46,7 @@ from .emotes import (
 )
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.1")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.2")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)

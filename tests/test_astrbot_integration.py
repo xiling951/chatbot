@@ -954,6 +954,20 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.plugin.context.llm_generate.assert_awaited_once()
 
+    async def test_unsupported_waiting_is_replaced_before_reply_history_persists(self):
+        raw = "哈哈，我今天哪也没去，一直在对话框里等你呢。"
+        self.plugin.context.llm_generate.return_value.completion_text = raw
+        event = LocalEvent("刚才你在做什么？", "unsupported-waiting")
+        await self.plugin.handle(event)
+        self.assertEqual(len(event.sent), 1)
+        self.assertIn("收到消息时才回应", event.sent[0])
+        self.assertNotIn("一直在对话框里等你", event.sent[0])
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        history = self.plugin.store.history(scope, event.get_session_id())
+        self.assertNotIn(raw, str(history))
+        self.assertIn(event.sent[0], str(history))
+        self.plugin.context.llm_generate.assert_awaited_once()
+
     async def test_emotes_opt_in_one_image_cooldown_and_natural_opt_out(self):
         await self.plugin.handle(LocalEvent("/表情 开", "emote-on"))
         self.plugin.context.llm_generate.return_value.completion_text = (

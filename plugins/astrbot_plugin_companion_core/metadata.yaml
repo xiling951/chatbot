@@ -1,6 +1,6 @@
 name: astrbot_plugin_companion_core
 display_name: Companion Core
 desc: Scoped user memory with grounded extraction and deletion-safe recovery
-version: v0.6.1
+version: v0.6.2
 author: local
 repo: ""

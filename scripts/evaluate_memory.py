@@ -23,7 +23,9 @@ def main():
     parser.add_argument("--persona-cases", type=int, default=0)
     parser.add_argument("--persona-start", type=int, default=0)
     parser.add_argument(
-        "--persona-set", choices=["development", "heldout"], default="development"
+        "--persona-set",
+        choices=["development", "heldout", "fresh-heldout"],
+        default="development",
     )
     parser.add_argument(
         "--suite",
@@ -43,7 +45,7 @@ def main():
     parser.add_argument("--m01-indices", default=",".join(str(i) for i in range(1, 21)))
     parser.add_argument("--discovery-bvid", default="BV1xx411c7mD")
     args = parser.parse_args()
-    limit = 10 if args.persona_set == "heldout" else 20
+    limit = 20 if args.persona_set == "development" else 10
     if (
         not 0 <= args.persona_start <= limit
         or not 0 <= args.persona_cases <= limit
@@ -53,6 +55,12 @@ def main():
             "Persona selection must stay inside the selected development/held-out set"
         )
     project = Path(__file__).resolve().parents[1]
+    persona_cases_path = project / "tests" / (
+        "persona_holdout_v2.json"
+        if args.persona_set == "fresh-heldout"
+        else "persona_cases.json"
+    )
+    persona_case_bytes = persona_cases_path.read_bytes()
     cases = json.loads(
         (project / "tests/memory_cases.json").read_text(encoding="utf-8")
     )
@@ -71,6 +79,8 @@ def main():
         "selected_m01_indices": sorted(indices),
         "suite": args.suite,
         "persona_set": args.persona_set,
+        "persona_cases_file": persona_cases_path.name,
+        "persona_cases_sha256": hashlib.sha256(persona_case_bytes).hexdigest(),
         "persona_sha256": hashlib.sha256(
             (DATA / "plugins/astrbot_plugin_companion_core/persona.yaml").read_bytes()
         ).hexdigest(),
@@ -453,12 +463,12 @@ def main():
                 send("/恢复记忆")
                 report["privacy_stop_command_checks_passed"] = True
             persona_cases = json.loads(
-                (project / "tests/persona_cases.json").read_text(encoding="utf-8")
+                persona_case_bytes.decode("utf-8")
             )
             for case in [
                 c
                 for c in persona_cases
-                if c["held_out"] == (args.persona_set == "heldout")
+                if c["held_out"] == (args.persona_set != "development")
             ][args.persona_start : args.persona_start + args.persona_cases]:
                 conversation = uuid.uuid4().hex
                 scenario = {
