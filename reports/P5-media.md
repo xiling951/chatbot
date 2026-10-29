@@ -31,3 +31,5 @@ QQ底层标准发送含重试及转主动路径，新图片发送使用原C2C事
 当前微信原生语音路径复核：腾讯仓库[send-media.ts](https://github.com/Tencent/openclaw-weixin/blob/main/src/messaging/send-media.ts)仍将非图片/视频按文件发送；仓库[问题209](https://github.com/Tencent/openclaw-weixin/issues/209)与[问题215](https://github.com/Tencent/openclaw-weixin/issues/215)有其他使用者报告VOICE/SILK接口接受但客户端不显示，未发现已验证的官方修复。问题反馈不构成平台永久不支持的声明；目前没有足够新证据再次要求本人重复失败探测，硬要求仍未完成。
 
 2026-10-28独立图片预检：当前官方deepseek-flash以base64读取项目公开E01 PNG，返回内容包含正式文字“你好呀”，1/1；vision-preflight.local.json记录原图摘要、11808字节、221输入/71输出token、3.61秒及无私聊媒体上传。依据[官方Vision文档](https://api-docs.deepseek.com/guides/vision/)，这是模型能力预检，不是已上线图片理解或手机验收。用户当前暂停测试，图片/视频聊天入口仍维持既有降级。
+
+图片输入开发草稿位于vision.py，尚未导入现有事件处理器、未部署或执行测试。接口只接收受信渠道已取得的bytes，不解析路径/URL，不调用网络或模型、不写文件；源码按4MiB原图、1600万像素/8192边长、静态JPEG/PNG/WebP、1024边长/1MiB输出及2000字节问题限制编写。重编码设计移除EXIF/ICC等附带元数据，对透明图使用白底；动态图片拒绝而不把单帧冒充完整内容。仍须完成渠道来源/本人范围核对、真实提供商接线、停止/删除票据、用量及媒体回归，当前不称图片理解已实现。测试按用户休息要求暂缓。
