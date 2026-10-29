@@ -31,3 +31,5 @@ availability_report.py保留原窗口和微信adapter_report口径，另列qq_ad
 私有qq_loopback_proxy还可显式设为windows：仅在下次启动时只读当前用户ProxyEnable/ProxyServer，接受启用的静态HTTP回环端点或映射中的HTTPS端点；拒绝外部地址、凭据、PAC、禁用与歧义映射，不跟随任意环境代理。当前已配置此模式，本机解析与8项QQ/入口检查通过；为保留正在进行的本人测试连接，尚未再重启验证该模式。端口在进程运行期间不会自动切换，QQ仍依赖当前代理服务在线。
 
 B站只读工具可单独在私有设置选择bilibili_loopback_proxy，仅显式HTTP回环地址；当前对齐现有Windows代理端口。仅固定api.bilibili.com经CONNECT并验证TLS，不使用环境代理/Cookie/重定向，直连仍要求公网DNS。插件热重载可应用该设置而不重启IM适配器，v0.6.1已实际应用；一次匿名诊断成功不计会话活动，日限失败记录不重置，详见P5-bilibili.md。
+
+开发中的图片分支以私有vision_enabled严格布尔开关控制，缺省关闭，当前未设置开启或部署。待回归通过后才可启用；原v0.6.1部署不受源码草稿影响。模型接线只读现有cmd_config.json的官方Flash来源，使用单次直接SDK请求，避开框架的删图重试；不添加服务、平台、账号或凭据文件。图片只从已核实事件的微信受控临时文件/框架原生图片数据取得，QQ外链不自动下载。未完成的验证见P5-media.md。
