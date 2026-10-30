@@ -17,6 +17,7 @@ import httpx
 from filelock import FileLock, Timeout
 from local_paths import PROJECT_ROOT, DATA, PLUGIN_DATA
 from local_backup import maybe_backup
+from qq_media import prune_cache as prune_qq_image_cache
 
 sys.path.insert(0, str(PROJECT_ROOT))
 from plugins.astrbot_plugin_companion_core.cloud_tts import prune_cache
@@ -458,6 +459,12 @@ def main():
                 )
             except OSError as exc:
                 result["tts_cache_cleanup_error"] = type(exc).__name__
+            try:
+                result["expired_qq_image_cache_removed"] = prune_qq_image_cache(
+                    DATA / "temp", now
+                )
+            except (OSError, ValueError) as exc:
+                result["qq_image_cache_cleanup_error"] = type(exc).__name__
             with output.open("a", encoding="utf-8") as stream:
                 stream.write(json.dumps(result, ensure_ascii=False) + "\n")
             save_state(state, policy.state)

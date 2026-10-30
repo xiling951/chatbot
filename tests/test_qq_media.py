@@ -2,15 +2,18 @@
 
 import asyncio
 import json
+import os
 import ssl
 import sqlite3
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import botpy
@@ -18,7 +21,15 @@ from astrbot.api.message_components import Image
 from astrbot.core.platform.astr_message_event import event_context
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from qq_media import MAX_BYTES, MediaRefused, QQImages, image_url, install, uninstall
+from qq_media import (
+    MAX_BYTES,
+    MediaRefused,
+    QQImages,
+    image_url,
+    install,
+    uninstall,
+    prune_cache,
+)
 from test_astrbot_integration import LocalEvent
 from test_vision import png
 from plugins.astrbot_plugin_companion_core.vision import prepare_component
@@ -355,6 +366,104 @@ class QQMediaTests(unittest.IsolatedAsyncioTestCase):
             "qq_image_authorization_changed",
         )
         self.assertEqual(list(self.cache.iterdir()), [])
+
+
+class QQImageCacheTests(unittest.TestCase):
+    # Controlled file mtime tests, not evidence of 24 hours of real observation.
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name).resolve()
+        self.now = datetime(2026, 10, 30, 17, tzinfo=timezone.utc)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def owned(self, letter, hours):
+        path = self.root / ("companion_qq_img_" + letter * 32 + "_image.jpg")
+        path.write_bytes(b"synthetic image cache")
+        moment = (self.now - timedelta(hours=hours)).timestamp()
+        os.utime(path, (moment, moment))
+        return path
+
+    def test_only_expired_owned_regular_files_are_removed(self):
+        old = self.owned("a", 25)
+        fresh = self.owned("b", 1)
+        boundary = self.owned("c", 24)
+        directory = self.root / ("companion_qq_img_" + "d" * 32 + "_image.jpg")
+        directory.mkdir()
+        others = []
+        for name in (
+            "original.jpg",
+            "media_image_20261030000000123_abcd.jpg",
+            "weixin_oc_img_" + "e" * 32 + "_image.jpg",
+            "companion_qq_img_invalid_image.jpg",
+        ):
+            path = self.root / name
+            path.write_bytes(b"keep existing or other namespace")
+            moment = (self.now - timedelta(days=3)).timestamp()
+            os.utime(path, (moment, moment))
+            others.append(path)
+        self.assertEqual(prune_cache(self.root, self.now), 1)
+        self.assertFalse(old.exists())
+        self.assertTrue(
+            all(path.exists() for path in (fresh, boundary, directory, *others))
+        )
+        missing = self.root / "missing"
+        self.assertEqual(prune_cache(missing, self.now), 0)
+        self.assertFalse(missing.exists())
+
+    def test_file_updated_after_first_inspection_is_kept(self):
+        path = self.owned("a", 25)
+        original = Path.lstat
+        calls = 0
+
+        def changed(candidate, *args, **kwargs):
+            nonlocal calls
+            if candidate == path:
+                calls += 1
+                if calls == 2:
+                    path.write_bytes(b"fresh replacement")
+                    moment = self.now.timestamp()
+                    os.utime(path, (moment, moment))
+            return original(candidate, *args, **kwargs)
+
+        with patch.object(Path, "lstat", changed):
+            self.assertEqual(prune_cache(self.root, self.now), 0)
+        self.assertEqual(path.read_bytes(), b"fresh replacement")
+
+    def test_locked_file_is_retained_and_naive_time_cannot_delete(self):
+        path = self.owned("a", 25)
+        with self.assertRaises(ValueError):
+            prune_cache(self.root, self.now.replace(tzinfo=None))
+        with patch.object(Path, "unlink", side_effect=PermissionError):
+            self.assertEqual(prune_cache(self.root, self.now), 0)
+        self.assertTrue(path.exists())
+        self.assertEqual(prune_cache(self.root, self.now), 1)
+
+    def test_reparse_metadata_is_refused_without_following_a_target(self):
+        path = self.owned("a", 25)
+        original = Path.lstat
+        before = path.lstat()
+        info = SimpleNamespace(
+            st_mode=before.st_mode, st_mtime=before.st_mtime, st_file_attributes=0x400
+        )
+
+        def reparse(candidate, *args, **kwargs):
+            return info if candidate == path else original(candidate, *args, **kwargs)
+
+        with patch.object(Path, "lstat", reparse):
+            self.assertEqual(prune_cache(self.root, self.now), 0)
+        self.assertTrue(path.exists())
+
+    def test_expiry_is_24_elapsed_hours_across_daylight_saving_change(self):
+        current = datetime(2026, 11, 1, 16, tzinfo=timezone.utc).astimezone(
+            ZoneInfo("America/Tijuana")
+        )
+        path = self.owned("a", 25)
+        stamp = current.timestamp() - 24 * 3600 - 1800
+        os.utime(path, (stamp, stamp))
+        self.assertEqual(prune_cache(self.root, current), 1)
+        self.assertFalse(path.exists())
 
 
 if __name__ == "__main__":

@@ -38,4 +38,6 @@ v0.6.3图片理解由私有vision_enabled严格布尔开关控制，缺省关闭
 
 2026-10-30T02:59:47Z实际观察到新5分钟触发执行并退出0；原守护/机器人PID与创建时间完全不变，未重复启动，也未打断IM。3项Windows包装器实际隔离进程检查及19项runtime专项通过，含PID重用、损坏身份和缺配置；这不等于实际拔盘重连或主机重启演练通过。更新前任务XML自动备份至受限plugin_data/companion_core/startup-task-before-时间.local.xml。回退任务可由同一用户以该XML重新Register-ScheduledTask，不回滚删除账本/发送权限。最新分层证据startup-retry-acceptance.local.json。
 
-开发分支v0.6.4的QQ下载前置尚未开启：私有qq_bounded_images严格为true时，runtime_bootstrap.py才安装qq_media.py的固定框架图片前置；当前未配置，当前进程未加载，未来启动也不会缺省启用。安装状态在现有qq-transport-status.local.json的qq_bounded_images_installed/qq_media_error_type，须核实实际安装及插件版本，不以复制脚本当上线。插件须同时升级为v0.6.4以识别新临时文件与下载开始时的记忆修订；现在仍v0.6.3。前置本地检查覆盖上限、并发、超时、撤销、来源、清理和删除竞态，真实QQ附件下载/手机观察待验。启用后的失败不会回到框架旧下载路径；其他平台保留原预处理。用户休息期间不追加手机验收请求。
+开发分支v0.6.4的QQ下载前置尚未开启：私有qq_bounded_images严格为true时，runtime_bootstrap.py才安装qq_media.py的固定框架图片前置；当前未配置，聊天进程未安装该前置，未来启动也不会缺省启用。安装状态在现有qq-transport-status.local.json的qq_bounded_images_installed/qq_media_error_type，须核实实际安装及插件版本，不以复制脚本当上线。插件须同时升级为v0.6.4以识别新临时文件与下载开始时的记忆修订；现在仍v0.6.3。前置本地检查覆盖上限、并发、超时、撤销、来源、清理和删除竞态，真实QQ附件下载/手机观察待验。启用后的失败不会回到框架旧下载路径；其他平台保留原预处理。用户休息期间不追加手机验收请求。
+
+维护进程现已独立应用QQ专属孤儿缓存回收，与qq_bounded_images下载前置开关分开：每轮只匹配本项目companion_qq_img_UUID_image.jpg，普通文件且超过24实际小时、复核身份/大小/mtime未变化才删除；原框架/微信图片和其他名称不匹配。锁定/链接/重解析点保留，文件内不读取用户内容；正常路径仍由event_context即时清理。数量/异常类型在维护观察字段，--once仍只读。2026-10-30T17:20:03Z已用公开E01与模拟25小时mtime实际验证后台清理，当前聊天PID和创建时间不变；维护进程已更新，下载前置仍关闭、插件仍v0.6.3，不算真实崩溃或24小时观察。

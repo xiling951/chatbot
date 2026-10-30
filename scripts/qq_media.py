@@ -6,8 +6,10 @@ QQ refusals never fall back to the original unbounded network downloader.
 
 import asyncio
 import json
+import re
 import ssl
 import sqlite3
+import stat
 import uuid
 from contextlib import closing, suppress
 from pathlib import Path
@@ -19,6 +21,50 @@ from qq_transport import resolve_proxy
 MAX_BYTES = 4 * 1024 * 1024
 TOTAL_SECONDS = 15
 MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
+OWNED_IMAGE = re.compile(r"companion_qq_img_[0-9a-f]{32}_image\.jpg")
+
+
+def prune_cache(folder, current):
+    """Remove only old, unchanged regular files created by this QQ downloader.
+
+    Event cleanup is primary; this 24-hour expiry handles a killed process.
+    Existing framework media, WeChat images and unknown names are excluded.
+    """
+    if current.tzinfo is None or current.utcoffset() is None:
+        raise ValueError("QQ image cleanup needs an aware timestamp")
+    folder = Path(folder)
+    if not folder.exists():
+        return 0
+    root = folder.resolve(strict=True)
+    cutoff = current.timestamp() - 24 * 60 * 60
+    removed = 0
+    for candidate in root.glob("companion_qq_img_*"):
+        if not OWNED_IMAGE.fullmatch(candidate.name):
+            continue
+        try:
+            before = candidate.lstat()
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or candidate.is_symlink()
+                or getattr(before, "st_file_attributes", 0) & 0x400
+                or before.st_mtime >= cutoff
+                or candidate.resolve(strict=True).parent != root
+            ):
+                continue
+            after = candidate.lstat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ):
+                continue
+            candidate.unlink()
+            removed += 1
+        except OSError:
+            # A locked or concurrently replaced file is left for a later pass.
+            continue
+    return removed
 
 
 class MediaRefused(ValueError):
