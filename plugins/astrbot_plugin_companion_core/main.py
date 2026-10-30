@@ -57,7 +57,7 @@ from .vision import (
 from .vision_provider import generate_once as generate_vision_once
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.3")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.4")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -993,6 +993,12 @@ class CompanionCore(Star):
                 account = latest.get("bot_account_ids", {}).get(platform)
             self.store.binding.reconcile(self._binding_endpoints(latest))
             info = self.store.binding.identity(ticket.scope)
+            if event.get_extra("companion_qq_image_source") == "bounded_owned_download":
+                if latest.get("qq_bounded_images") is not True:
+                    return False
+                ingress = event.get_extra("companion_qq_image_revisions")
+                if not isinstance(ingress, dict) or ingress.get(ticket.scope, 0) != ticket.revision:
+                    return False
             return bool(
                 latest.get("vision_enabled") is True
                 and latest.get("model_enabled") is True

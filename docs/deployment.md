@@ -37,3 +37,5 @@ v0.6.3图片理解由私有vision_enabled严格布尔开关控制，缺省关闭
 含新增模块的首次插件热重载曾返回vision模块未找到，当前已通过recover_owned.ps1重启原实例并确认v0.6.2激活；升级时需核实实际已加载版本，不能以复制文件或HTTP200当成功。升级前DPAPI快照已校验解密和隔离最新账本重放。未确定热加载失败根因，未修改固定框架或放宽权限。Windows回环代理启动模式已随本次重启实际加载，QQ后台恢复，手机送达另验。
 
 2026-10-30T02:59:47Z实际观察到新5分钟触发执行并退出0；原守护/机器人PID与创建时间完全不变，未重复启动，也未打断IM。3项Windows包装器实际隔离进程检查及19项runtime专项通过，含PID重用、损坏身份和缺配置；这不等于实际拔盘重连或主机重启演练通过。更新前任务XML自动备份至受限plugin_data/companion_core/startup-task-before-时间.local.xml。回退任务可由同一用户以该XML重新Register-ScheduledTask，不回滚删除账本/发送权限。最新分层证据startup-retry-acceptance.local.json。
+
+开发分支v0.6.4的QQ下载前置尚未开启：私有qq_bounded_images严格为true时，runtime_bootstrap.py才安装qq_media.py的固定框架图片前置；当前未配置，当前进程未加载，未来启动也不会缺省启用。安装状态在现有qq-transport-status.local.json的qq_bounded_images_installed/qq_media_error_type，须核实实际安装及插件版本，不以复制脚本当上线。插件须同时升级为v0.6.4以识别新临时文件与下载开始时的记忆修订；现在仍v0.6.3。前置本地检查覆盖上限、并发、超时、撤销、来源、清理和删除竞态，真实QQ附件下载/手机观察待验。启用后的失败不会回到框架旧下载路径；其他平台保留原预处理。用户休息期间不追加手机验收请求。

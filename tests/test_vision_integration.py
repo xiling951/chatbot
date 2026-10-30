@@ -313,6 +313,52 @@ class VisionIntegrationTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(mutation=mutation):
                 self.assertFalse(trusted_qq_picture(event))
 
+    async def test_bounded_image_arriving_after_forget_cannot_capture_a_new_ticket(
+        self,
+    ):
+        self.settings(vision_enabled=True, qq_bounded_images=True)
+        await self.plugin.handle(
+            fixture.LocalEvent("/记住 颜色=青玉绿", "before-download")
+        )
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        revisions = {scope: self.plugin.store.begin(scope, "network-start").revision}
+        event = self.event(message_id="old-download-arrives")
+        event.set_extra("companion_qq_image_source", "bounded_owned_download")
+        event.set_extra("companion_qq_image_revisions", revisions)
+        await self.plugin.handle(
+            fixture.LocalEvent("/忘记 颜色", "delete-overtakes-download")
+        )
+        with patch(MODEL, new_callable=AsyncMock) as generate:
+            await self.plugin.handle(event)
+            generate.assert_not_awaited()
+        self.assertEqual(event.sent, [])
+        self.assertEqual(
+            self.plugin.store.db.execute("SELECT count(*) FROM turns").fetchone()[0], 0
+        )
+
+    async def test_current_bounded_ticket_is_allowed_until_its_host_switch_is_closed(
+        self,
+    ):
+        self.settings(vision_enabled=True, qq_bounded_images=True)
+        await self.plugin.handle(fixture.LocalEvent("/记忆", "scope-before-bounded"))
+        scope = self.plugin.store.db.execute("SELECT scope FROM scopes").fetchone()[0]
+        revisions = {scope: self.plugin.store.begin(scope, "download").revision}
+        with patch(
+            MODEL, new_callable=AsyncMock, return_value=self.result()
+        ) as generate:
+            first = self.event(message_id="fresh-bounded")
+            first.set_extra("companion_qq_image_source", "bounded_owned_download")
+            first.set_extra("companion_qq_image_revisions", revisions)
+            await self.plugin.handle(first)
+            self.assertIn("图片识别结果", first.sent[0])
+            self.settings(qq_bounded_images=False)
+            later = self.event(message_id="closed-bounded")
+            later.set_extra("companion_qq_image_source", "bounded_owned_download")
+            later.set_extra("companion_qq_image_revisions", revisions)
+            await self.plugin.handle(later)
+            self.assertEqual(later.sent, [])
+            generate.assert_awaited_once()
+
 
 if __name__ == "__main__":
     unittest.main()

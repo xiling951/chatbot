@@ -9,13 +9,16 @@ from datetime import UTC, datetime
 
 from local_paths import CODE_ROOT, PLUGIN_DATA
 from qq_transport import install_proxy
+from qq_media import install as install_qq_images
 
 
 def main():
     record = {
         "at": datetime.now(UTC).isoformat(),
         "qq_loopback_proxy_installed": False,
+        "qq_bounded_images_installed": False,
     }
+    settings = {}
     try:
         settings = json.loads(
             (PLUGIN_DATA / "settings.local.json").read_text(encoding="utf-8")
@@ -31,12 +34,22 @@ def main():
     except Exception as exc:  # noqa: BLE001 -- optional QQ setup must not block startup
         # An optional QQ problem must not prevent WeChat/Web from starting.
         record["error_type"] = type(exc).__name__
+    os.chdir(CODE_ROOT)
+    sys.path.insert(0, str(CODE_ROOT))
+    if settings.get("qq_bounded_images") is True:
+        try:
+            install_qq_images(
+                PLUGIN_DATA,
+                PLUGIN_DATA.parent.parent,
+                PLUGIN_DATA.parent.parent / "temp",
+            )
+            record["qq_bounded_images_installed"] = True
+        except Exception as exc:
+            record["qq_media_error_type"] = type(exc).__name__
     with suppress(OSError):
         (PLUGIN_DATA / "qq-transport-status.local.json").write_text(
             json.dumps(record), encoding="utf-8"
         )
-    os.chdir(CODE_ROOT)
-    sys.path.insert(0, str(CODE_ROOT))
     sys.argv = [str(CODE_ROOT / "main.py")]
     runpy.run_path(str(CODE_ROOT / "main.py"), run_name="__main__")
 
