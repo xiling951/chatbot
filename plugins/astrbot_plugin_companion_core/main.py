@@ -52,11 +52,12 @@ from .vision import (
     SYSTEM_RULES as VISION_SYSTEM_RULES,
     ImageRejected,
     prepare_component,
+    trusted_qq_picture,
 )
 from .vision_provider import generate_once as generate_vision_once
 
 
-@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.2")
+@register("astrbot_plugin_companion_core", "local", "Scoped companion memory", "0.6.3")
 class CompanionCore(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -1012,7 +1013,7 @@ class CompanionCore(Star):
         except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error):
             return False
 
-    async def _prepare_image(self, component, platform_name):
+    async def _prepare_image(self, component, platform_name, *, qq_inbound=False):
         previous = getattr(self, "_image_prepare_task", None)
         if previous is not None and not previous.done():
             raise ImageRejected("image_prepare_busy")
@@ -1023,6 +1024,7 @@ class CompanionCore(Star):
             local_path=component.path,
             platform_name=platform_name,
             temp_root=Path(get_astrbot_temp_path()),
+            qq_inbound=qq_inbound,
         ))
         self._image_prepare_task = task
 
@@ -1050,7 +1052,10 @@ class CompanionCore(Star):
         try:
             if len(question.encode("utf-8")) > MAX_IMAGE_QUESTION_BYTES:
                 raise ImageRejected("question_too_large")
-            prepared = await self._prepare_image(component, event.get_platform_name())
+            prepared = await self._prepare_image(
+                component, event.get_platform_name(),
+                qq_inbound=trusted_qq_picture(event) if event.get_platform_name() == "qq_official" else False,
+            )
             if not self._image_allowed(event, ticket, provider_id):
                 record["state"] = "canceled_before_model"
                 return None
