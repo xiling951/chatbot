@@ -1,8 +1,8 @@
 """One verified Flash vision request, without the framework's text-only fallback.
 
 Use the existing private AstrBot provider configuration. Never log credentials,
-image bodies or raw provider exceptions. This development path is disabled by
-default in the caller and has not been activated in the deployed runtime.
+image bodies or raw provider exceptions. The caller disables image analysis by
+default and rechecks private-chat authorization before and after this request.
 """
 
 import hashlib
@@ -79,7 +79,8 @@ async def generate_once(
     })
     # The pinned SDK can use an httpx compatibility module distinct from the
     # globally imported httpx package. Construct its expected client type.
-    async with _base_client.httpx.AsyncClient(
+    http = getattr(_base_client, "httpx", None) or _base_client.httpx2
+    async with http.AsyncClient(
         proxy=proxy, trust_env=False, verify=True, timeout=30,
     ) as transport:
         async with AsyncOpenAI(

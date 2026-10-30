@@ -750,6 +750,7 @@ class CompanionCore(Star):
                     reply += "\n/绑定帮助：查看本人微信/QQ指定属性共享与解绑步骤（默认不共享）。"
                     reply += "\n/B站帮助：匿名元数据读取及记录（不是视频观看）。"
                     reply += "\n/表情帮助：可选原创图片表情（默认关闭）。"
+                    reply += "\n/图片帮助：查看图片理解状态、支持范围及资料处理方式。"
                 elif text.startswith("/"):
                     reply = (
                         "当前测试入口由 Companion Core 接管；使用 /记忆帮助 查看命令。"
